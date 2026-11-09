@@ -11,17 +11,27 @@
 
 // ---------- 市场代码 ----------
 function emMarket(code) {
-  // 东财 secid 市场码：1=上交所（6/9开头），0=深交所（0/2/3开头），2=北交所（8/4开头）
-  if (/^[69]/.test(code)) return 1;
+  // 东财 secid 市场码：1=上交所（5/6/9开头，5 为上交所 ETF 如 515220），0=深交所（0/2/3开头），2=北交所（8/4开头）
+  // 2026-11-09 实测修正：5 开头此前误判为深市，导致煤炭ETF 515220 行情/K线取不到数；
+  // secid=1.515220 实测返回 f43=1.208（与腾讯 sh515220 一致），0.515220 无数据。
+  if (code === "000300") return 1; // 沪深300 指数在沪市
+  if (/^[569]/.test(code)) return 1;
   if (/^[84]/.test(code)) return 2;
   return 0;
 }
 function txMarket(code) {
-  if (/^[69]/.test(code)) return "sh";
+  if (code === "000300") return "sh"; // 沪深300 指数在沪市，通用映射会误判为深市（sz000300 无数据）
+  if (/^[569]/.test(code)) return "sh";
   if (/^[84]/.test(code)) return "bj";
   return "sz";
 }
 function secid(code) { return emMarket(code) + "." + code; }
+// F10 表用的 SECUCODE 是“代码.市场后缀”格式（600519.SH / 000001.SZ / 430001.BJ），
+// 与 push2 的 secid（1.600519）正好相反，不要混用。
+function secucode(code) {
+  const m = emMarket(code);
+  return code + "." + (m === 1 ? "SH" : m === 0 ? "SZ" : "BJ");
+}
 function txSymbol(code) { return txMarket(code) + code; }
 
 // ---------- 通用 fetch（带 Referer/Origin，提高东财成功率）----------
@@ -230,6 +240,9 @@ async function emDatacenter(reportName, columns, filter, opts = {}) {
     sortColumns: opts.sortColumns || "",
     sortTypes: opts.sortTypes || "",
   });
+  // 部分 F10 表（如 RPT_F10_FN_MAINOP）只在 source=F10&client=PC 下有配置
+  if (opts.source) params.set("source", opts.source);
+  if (opts.client) params.set("client", opts.client);
   const r = await fetch(API.EM_DATACENTER + "?" + params.toString(), {
     headers: { "Referer": "https://data.eastmoney.com/", "Origin": "https://data.eastmoney.com" },
   });
@@ -266,11 +279,12 @@ function fetchIncomeFull(code, pageSize = 60) {
 // 资产负债表：REPORT_DATE（有下划线）、TOTAL_ASSETS、TOTAL_LIABILITIES、
 // TOTAL_EQUITY、MONETARYFUNDS（货币资金）、INVENTORY（存货）、
 // CURRENT_RATIO（流动比率，接口返回的是百分比，需 ÷100）、DEBT_ASSET_RATIO（资产负债率，%）、
-// SHORT_LOAN（短期借款）、ACCOUNTS_RECE（应收账款）、ACCOUNTS_PAYABLE（应付账款）、FIXED_ASSET（固定资产）
+// SHORT_LOAN（短期借款）、ACCOUNTS_RECE（应收账款）、ACCOUNTS_PAYABLE（应付账款）、FIXED_ASSET（固定资产）、
+// ADVANCE_RECEIVABLES（预收款项，2020 年后约等于合同负债，CbOP 应计用；2026-11-09 实测 DMSK 表含此字段）
 function fetchBalance(code, pageSize = 60) {
   return emDatacenter(
     "RPT_DMSK_FN_BALANCE",
-    "SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,MONETARYFUNDS,INVENTORY,CURRENT_RATIO,DEBT_ASSET_RATIO,SHORT_LOAN,ACCOUNTS_RECE,ACCOUNTS_PAYABLE,FIXED_ASSET",
+    "SECURITY_CODE,REPORT_DATE,TOTAL_ASSETS,TOTAL_LIABILITIES,TOTAL_EQUITY,MONETARYFUNDS,INVENTORY,CURRENT_RATIO,DEBT_ASSET_RATIO,SHORT_LOAN,ACCOUNTS_RECE,ACCOUNTS_PAYABLE,FIXED_ASSET,ADVANCE_RECEIVABLES",
     '(SECURITY_CODE="' + code + '")',
     { pageSize, sortColumns: "REPORT_DATE", sortTypes: "-1" }
   );
@@ -325,6 +339,40 @@ function fetchForecast(code, pageSize = 6) {
   );
 }
 
+// ---------- 5b. 公司简介（东财 F10）----------
+// RPT_F10_BASIC_ORGINFO，columns=ALL 实测（2026-11-09，茅台）：
+// 除 ORG_PROFILE 外还返回 LISTING_DATE（上市日期）、FOUND_DATE（成立日期）、
+// MAIN_BUSINESS（主营业务）、BUSINESS_SCOPE（经营范围）、EMP_NUM（员工数）、
+// CHAIRMAN（董事长）、PRESIDENT（总经理）、LEGAL_PERSON（法人）、SECRETARY（董秘）、
+// ACTUAL_HOLDER（实际控制人）、REG_CAPITAL（注册资本）、ORG_TEL/ORG_EMAIL/ORG_WEB、
+// ADDRESS、INDUSTRYCSRC1（证监会行业）、BOARD_NAME_LEVEL（东财三级行业）。
+// ETF（如 515220）无此表记录，返回 []，调用方按无简介处理，不要当错误抛。
+async function fetchCompanyProfile(code) {
+  const rows = await emDatacenter(
+    "RPT_F10_BASIC_ORGINFO",
+    "ALL",
+    '(SECURITY_CODE="' + code + '")',
+    { pageSize: 1 }
+  );
+  return (rows && rows[0]) || null;
+}
+
+// ---------- 5c. 主营业务构成（东财 F10）----------
+// RPT_F10_FN_MAINOP，2026-11-09 实测（茅台，source=F10&client=PC）：
+// 字段名注意：日期是 REPORT_DATE（带下划线）、构成名是 ITEM_NAME（不是 MAINOP_NAME）；
+// MAINOP_TYPE：1=按行业（如“酒类”）、2=按产品（茅台酒 MBI_RATIO 0.8622、系列酒 0.1372）、
+// 3=按地区（国内 0.9869、国外 0.0125）。另有 GROSS_RPOFIT_RATIO（毛利率）、MAIN_BUSINESS_COST。
+// filter 必须用 SECUCODE="600519.SH"（带市场后缀）。最新报告期一行一组。
+async function fetchMainop(code) {
+  const rows = await emDatacenter(
+    "RPT_F10_FN_MAINOP",
+    "SECUCODE,SECURITY_CODE,REPORT_DATE,MAINOP_TYPE,ITEM_NAME,MAIN_BUSINESS_INCOME,MBI_RATIO,MAIN_BUSINESS_COST,MAIN_BUSINESS_RPOFIT,MBR_RATIO,GROSS_RPOFIT_RATIO",
+    '(SECUCODE="' + secucode(code) + '")',
+    { pageSize: 40, sortColumns: "REPORT_DATE", sortTypes: "-1", source: "F10", client: "PC" }
+  );
+  return rows || [];
+}
+
 // ---------- 6. 市场异动（涨幅榜前 N）----------
 // push2 clist，fid=f3 按涨跌幅降序。偶发 502，调用方重试一次。
 async function fetchMovers(limit = 12) {
@@ -339,6 +387,212 @@ async function fetchMovers(limit = 12) {
     code: it.f12, name: it.f14,
     price: it.f2, changePct: it.f3,
   }));
+}
+
+// ---------- 7. 行业 / 概念板块（热力图用）----------
+// push2 clist fs=m:90+t:2（行业，2026-11-09 实测 496 个）/ m:90+t:3（概念，531 个）
+// f12=板块代码（BKxxxx），f14=名称，f2=最新价，f3=涨跌幅%，f8=换手率%，f20=总市值
+async function fetchBoards(kind = "industry", limit = 500) {
+  const fs = kind === "concept" ? "m:90+t:3" : "m:90+t:2";
+  const url = API.EM_CLIST
+    + "?fid=f3&po=1&pz=" + limit + "&pn=1&np=1&fltt=2&invt=2"
+    + "&fs=" + fs
+    + "&fields=f12,f14,f2,f3,f8,f20"
+    + "&ut=bd1d9ddb04089700cf9c27f6f742628";
+  const j = await emFetch(url);
+  const diff = (j.data && j.data.diff) || [];
+  return diff.map((it) => ({
+    code: it.f12, name: it.f14,
+    price: it.f2, changePct: it.f3, turnover: it.f8, totalMcap: it.f20,
+  }));
+}
+
+// ---------- 8. 全市场扫描（低估雷达用）----------
+// push2 clist 全市场（2026-11-09 实测 5563 只），fid=f9 按 PE 升序
+// f9=PE（静态，实测与腾讯[52]一致，不是 PE-TTM）、f23=PB、f20=总市值、f21=流通市值、f8=换手率%
+// clist 无 ROE、无股息率（f126 在 clist 里恒为 0，f129 口径未确认勿用）；ROE 需腾讯 qt 批量补。
+async function fetchMarketScan(limit = 200) {
+  const url = API.EM_CLIST
+    + "?fid=f9&po=1&pz=" + limit + "&pn=1&np=1&fltt=2&invt=2"
+    + "&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+    + "&fields=f12,f14,f2,f3,f8,f9,f20,f21,f23"
+    + "&ut=bd1d9ddb04089700cf9c27f6f742628";
+  const j = await emFetch(url);
+  const diff = (j.data && j.data.diff) || [];
+  return diff.map((it) => ({
+    code: it.f12, name: it.f14,
+    price: it.f2, changePct: it.f3, turnover: it.f8,
+    pe: it.f9, pb: it.f23, totalMcap: it.f20, floatMcap: it.f21,
+  }));
+}
+
+// ---------- 9. 沪深300 成分股（目标价用）----------
+// 2026-11-09 实测：push2 clist fs=b:MK000300 在本机出口持续 rc=102（疑似该 fs 无效），
+// 正确来源是 datacenter RPT_INDEX_CONSTITUENT（source=HSF10&client=WEB）：
+// filter=(INDEX_CODE="000300")，pageSize=300，一次返回 300 只不重复（TRADE_DATE 是纳入日期）。
+// 该表只有代码/名称，无 PE/市值——PE 与市值由调用方用腾讯 qt 分批补（见 renderHs300）。
+async function fetchHs300Constituents() {
+  const rows = await emDatacenter(
+    "RPT_INDEX_CONSTITUENT",
+    "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,SECUCODE",
+    '(INDEX_CODE="000300")',
+    { pageSize: 300, sortColumns: "TRADE_DATE", sortTypes: "-1", source: "HSF10", client: "WEB" }
+  );
+  const seen = new Set();
+  const out = [];
+  for (const r of rows || []) {
+    const code = r.SECURITY_CODE;
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push({ code, name: r.SECURITY_NAME_ABBR });
+  }
+  return out;
+}
+// 腾讯 qt 分批（每批 100 只），合并返回 {code: quote}
+async function fetchTxQuotesChunked(codes, chunkSize = 100) {
+  const out = {};
+  for (let i = 0; i < codes.length; i += chunkSize) {
+    const part = await fetchTxQuotes(codes.slice(i, i + chunkSize));
+    Object.assign(out, part);
+  }
+  return out;
+}
+
+// ---------- 10. 沪深300 长 K 线（年度回报用）----------
+// 东财 push2his lmt=4000（约 16 年日线）；失败则降级腾讯按 2 年分段拉（2010 年至今）。
+// 腾讯 fqkline 支持起止日期：param=sh000300,day,2010-01-04,2011-12-30,640,qfq（2026-11-09 实测每段约 480 行）。
+async function fetchKlineTXRange(symbol, period, startDate, endDate) {
+  const param = symbol + "," + period + "," + startDate + "," + endDate + ",640,qfq";
+  let lastErr = null;
+  for (const base of API.TX_KLINE_HOSTS) {
+    try {
+      const r = await fetch(base + "?param=" + encodeURIComponent(param), {
+        headers: { "Referer": "https://gu.qq.com/" },
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if (j.code !== 0) throw new Error("腾讯 K 线 code=" + j.code);
+      const node = (j.data || {})[symbol] || {};
+      const items = node["qfq" + period] || node[period] || [];
+      if (!items.length) throw new Error("腾讯 K 线无数据");
+      const rows = items.map((it, i, arr) => {
+        const prevClose = i > 0 ? parseFloat(arr[i - 1][2]) : null;
+        const close = parseFloat(it[2]);
+        return {
+          date: String(it[0]).slice(0, 10),
+          open: parseFloat(it[1]), close, high: parseFloat(it[3]), low: parseFloat(it[4]),
+          volume: parseFloat(it[5]), amount: null, amplitude: null,
+          changePct: prevClose ? (close - prevClose) / prevClose * 100 : 0,
+          changeAmt: prevClose ? close - prevClose : 0, turnover: null,
+        };
+      });
+      rows.source = "tencent-range";
+      return rows;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("腾讯 K 线不可用");
+}
+async function fetchHs300LongKline() {
+  // 注意：不能走 fetchKline（它在东财失败时会自动降级腾讯 640 根，约 2.5 年，catch 永远触发不了）；
+  // 这里直接调 fetchKlineEM，失败才进腾讯分段拉取。
+  try {
+    return await fetchKlineEM(API.HS300_CODE, 101, 4000, "1.000300");
+  } catch (e) {
+    const segs = [];
+    const endY = new Date().getFullYear();
+    for (let y = 2010; y <= endY; y += 2) {
+      const s = y + "-01-01", en = Math.min(y + 1, endY) + "-12-31";
+      try {
+        const rows = await fetchKlineTXRange("sh000300", "day", s, en);
+        segs.push(...rows);
+      } catch (e2) { /* 单段失败跳过 */ }
+    }
+    if (!segs.length) throw e;
+    const seen = new Set();
+    const out = [];
+    for (const r of segs.sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+      if (!seen.has(r.date)) { seen.add(r.date); out.push(r); }
+    }
+    out.source = "tencent-range";
+    return out;
+  }
+}
+
+// ---------- 11. 板块指数 K 线（行业历史用）----------
+// 板块 secid = 90.BKxxxx（2026-11-09 实测：90.BK0429 行情 rc=0，名称“交运设备”）。
+// push2his 偶发 rc=102，调用方应重试 2 次。
+async function fetchBoardKline(boardCode, klt = 101, limit = 250) {
+  const secidOverride = "90." + boardCode;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetchKlineEM(boardCode, klt, limit, secidOverride);
+    } catch (e) {
+      if (attempt === 2) throw e;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+}
+
+// ---------- 12. 研报（分析师预测 / 情绪用）----------
+// reportapi /report/list：code/stockCode 参数不生效（2026-11-09 实测：
+// 带 code 查 600519 返回 hits=0，不带 code 返回全市场研报，每条自带 stockCode）。
+// 做法：拉最近 N 天全市场研报（每页 100 条，默认 2 页），客户端按 stockCode 筛选。
+// 每条含：标题/机构/发布日/评级（emRatingName，如“买入”）/评级变化、
+// predictThisYearEps / predictNextYearEps / predictNextTwoYearEps（元）及对应 PE、
+// indvAimPriceT/L（分析师目标价，多数为空）。
+// 覆盖说明：只覆盖窗口内有新研报的股票；冷门股可能 90 天内无研报，属实标明。
+async function fetchReports(code, days = 90, pages = 3) {
+  const end = new Date();
+  const begin = new Date();
+  begin.setDate(begin.getDate() - days);
+  const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const out = [];
+  for (let pageNo = 1; pageNo <= pages; pageNo++) {
+    const url = API.EM_REPORT_LIST
+      + "?qType=0&beginTime=" + fmt(begin) + "&endTime=" + fmt(end)
+      + "&pageNo=" + pageNo + "&pageSize=100";
+    const r = await fetch(url, { headers: { "Referer": "https://data.eastmoney.com/" } });
+    if (!r.ok) throw new Error("研报接口 HTTP " + r.status);
+    const j = await r.json();
+    const data = (j && j.data) || [];
+    for (const it of data) {
+      if (String(it.stockCode) === String(code)) {
+        out.push({
+          title: it.title, org: it.orgSName || it.orgName, orgFull: it.orgName,
+          publishDate: (it.publishDate || "").slice(0, 10),
+          rating: it.emRatingName || it.sRatingName || "",
+          ratingChange: it.ratingChange,
+          epsThisYear: num2orNull(it.predictThisYearEps),
+          peThisYear: num2orNull(it.predictThisYearPe),
+          epsNextYear: num2orNull(it.predictNextYearEps),
+          peNextYear: num2orNull(it.predictNextYearPe),
+          epsNext2Year: num2orNull(it.predictNextTwoYearEps),
+          peNext2Year: num2orNull(it.predictNextTwoYearPe),
+          aimPriceT: num2orNull(it.indvAimPriceT),
+          aimPriceL: num2orNull(it.indvAimPriceL),
+          researcher: it.researcher || "",
+          reportCount: it.count,
+        });
+      }
+    }
+    if (data.length < 100) break;
+  }
+  out.sort((a, b) => String(b.publishDate).localeCompare(String(a.publishDate)));
+  return out;
+}
+function num2orNull(v) { const n = parseFloat(v); return isFinite(n) && n !== 0 ? n : null; }
+
+// ---------- 13. 十大股东 / 机构持仓（暂不可用，原因见 holders 说明）----------
+// 2026-11-09 实测结论：
+// ① 东财 F10 PageAjax（emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageAjax）
+//    curl 能返回十大股东/十大流通股东/股东户数/基金持仓，但响应无 Access-Control-Allow-Origin，
+//    浏览器 fetch 会被 CORS 拦截，静态站无法直接调用；
+// ② datacenter 无十大股东表（RPT_F10_MAIN_HOLDER / RPT_FUND_HOLD_STOCK / RPT_MUTUAL_HOLD_STOCK 均 9501）；
+// ③ 雪球 top_holders.json 对本机出口 IP 返回 403（IP 黑名单），且需登录态。
+// 因此机构持仓页只展示“暂不可用 + 原因 + 手动查看链接”，不造数据。
+// 若日后东财放开 CORS 或找到新源，在此实现 fetchHolders 并接回 renderHolders。
+async function fetchHolders() {
+  throw new Error("十大股东无浏览器可用的免费源（东财 F10 接口无 CORS、datacenter 无此表、雪球封 IP）");
 }
 
 // ---------- 一只股票的全部数据（并行拉取，单项失败不拖垮整页）----------
@@ -358,6 +612,8 @@ async function fetchStockAll(code) {
     ["dividends", fetchDividends(code)],
     ["calendar", fetchCalendar(code)],
     ["forecast", fetchForecast(code)],
+    ["profile", fetchCompanyProfile(code)],
+    ["mainop", fetchMainop(code)],
   ];
   const results = await Promise.allSettled(jobs.map((j) => j[1]));
   jobs.forEach((j, i) => {

@@ -33,6 +33,11 @@ const API = {
   ],
   // 腾讯搜索联想（无 CORS，用 <script> JSONP 方式加载，返回 v_hint）
   TX_SUGGEST: "https://smartbox.gtimg.cn/s3/?v=2&t=all&q=",
+  // 东财研报列表（分析师预测/情绪；2026-11-09 实测：code 参数不生效，
+  // 需拉全市场最新研报再按 stockCode 客户端筛选；返回 CORS 头，浏览器可直调）
+  EM_REPORT_LIST: "https://reportapi.eastmoney.com/report/list",
+  // 沪深300（目标价 / 年度回报用）
+  HS300_CODE: "000300",
 };
 
 // ---- 自选股（首次打开时预装，可增删，存在 localStorage）----

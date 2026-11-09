@@ -223,6 +223,20 @@ canvas.chart { width: 100%; height: 100%; display: block; }
 .rules table.tbl td:first-child { width: 90px; font-weight: 600; }
 .rules p { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 
+/* ---------- 工具包 ---------- */
+.tool-tabs { border-bottom-color: #dbeafe; background: #f8fafc; border-radius: 8px 8px 0 0; padding: 0 6px; }
+.tool-tabs .tool-label { display: inline-flex; align-items: center; padding: 10px 8px 10px 4px; font-size: 14px; font-weight: 700; color: var(--ink); }
+.tool-tabs button.active { color: var(--blue); border-bottom-color: var(--blue); font-weight: 700; }
+.tool-pane { display: none; }
+.heatmap { display: flex; flex-wrap: wrap; gap: 4px; }
+.hm-cell {
+  flex: 1 1 92px; max-width: 150px; min-height: 52px; border-radius: 6px;
+  padding: 6px 8px; cursor: pointer; display: flex; flex-direction: column; justify-content: center;
+}
+.hm-cell:hover { outline: 2px solid var(--blue); }
+.hm-cell .hm-name { font-size: 12px; font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-cell .hm-pct { font-size: 12px; font-weight: 700; }
+
 /* ---------- 加载 / 空态 ---------- */
 .loading { text-align: center; padding: 40px 0; color: var(--muted); }
 .empty { text-align: center; padding: 36px 0; color: var(--muted); }

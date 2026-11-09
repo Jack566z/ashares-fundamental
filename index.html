@@ -122,6 +122,27 @@
           <button data-tab="cyclicality">周期性</button>
           <button data-tab="calendar">财报日历</button>
           <button data-tab="rules">打分指南</button>
+          <button data-tab="kpi">关键绩效指标</button>
+          <button data-tab="segments">业务分部</button>
+          <button data-tab="seasonality">季节性</button>
+          <button data-tab="holders">机构持仓</button>
+          <button data-tab="analyst">分析师</button>
+          <button data-tab="target">目标价格</button>
+          <button data-tab="investor">谁会投资</button>
+          <button data-tab="smith">特里·史密斯</button>
+          <button data-tab="company">公司</button>
+          <button data-tab="winrate">胜率方法库</button>
+          <button data-tab="profitfactor">盈利因子前五</button>
+        </div>
+
+        <!-- 工具包（市场级，不依赖当前个股） -->
+        <div class="tabs tool-tabs" id="toolTabs">
+          <span class="tool-label">🧰 工具包</span>
+          <button data-tool="heatmap">热力图</button>
+          <button data-tool="radar">低估雷达</button>
+          <button data-tool="compare">比较器</button>
+          <button data-tool="hs300">沪深300</button>
+          <button data-tool="mycharts">我的图形</button>
         </div>
 
         <!-- 概况 -->
@@ -228,6 +249,7 @@
             </div>
             <div class="chart-box tall"><canvas class="chart" id="klineChart"></canvas></div>
             <p class="muted" id="klineNote"></p>
+            <button class="primary" id="saveChartBtn" style="padding:8px 16px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px">💾 保存当前图形到“我的图形”</button>
           </div>
           <div class="card">
             <h2>📉 振荡指标</h2>
@@ -309,6 +331,10 @@
             <h2>🏭 行业</h2>
             <div id="sectorBody"></div>
           </div>
+          <div class="card">
+            <h2>📈 行业及其历史 · 行业指数走势与回报 <span class="muted" style="font-weight:400">东财行业板块指数</span></h2>
+            <div id="sectorHistBody"></div>
+          </div>
         </div>
 
         <!-- 周期性 -->
@@ -371,6 +397,8 @@
             <p>自由现金流 FCF（TTM）= 经营活动现金流净额（TTM）+ 投资活动现金流净额（TTM，投资流通常为负）。预测第 t 年 FCF = FCF₀ × (1+g)ᵗ，g 默认取近 3 年归母净利润复合增速（限 0~15%），可手动改。终值 TV = FCF₅ × (1+永续增长率) ÷ (WACC − 永续增长率)。企业价值 = Σ FCFₜ ÷ (1+WACC)ᵗ + TV ÷ (1+WACC)⁵。股权价值 = 企业价值 − 净负债（总负债 − 货币资金）。内在价值/股 = 股权价值 ÷ 总股本。FCF ≤ 0 或无现金流数据时 DCF 不适用。</p>
             <h4>评级</h4>
             <p>≥ 80 优秀；65 ~ 80 良好；50 ~ 65 一般；35 ~ 50 偏弱；&lt; 35 较弱。ETF 部分评分为同比例换算。</p>
+            <h4>胜率视角（评分权重为什么这样定）</h4>
+            <p>本站综合评分的权重本身已向胜率证据最强的因子倾斜：盈利（ROE/净利率）25 分为六维最高——质量/盈利因子是全球回测中最扎实、A股亦有直接证据的一组（见「胜率方法库」第 1、2 名）；技术仅 10 分——A股纯价格动量 2005 年后已失效（第 3 名），单靠技术信号不给高分。注意：综合评分是基本面质量分，不是胜率承诺；高胜率≠赚钱——V23 胜率 62.8% 但期望仅 +0.02R（均赢 +0.70R / 均亏 −1.14R），只追胜率会把期望压到零。每个信号请同时看胜率、盈利因子、期望 R、最大回撤四件套，缺一项即标“验证不完整”，见「胜率方法库」标签页。</p>
             <h4>参考：AleInversor 的档位（原文对照，仅供参考，不参与本站打分）</h4>
             <table class="tbl"><tr><th>指标</th><th>档位</th></tr>
             <tr><td>P/E</td><td>≤ 12 很便宜 · 13–18 合理 · 19–35 贵 · &gt; 35 很贵/负值</td></tr>
@@ -388,6 +416,140 @@
             <tr><td>Payout</td><td>≤ 50% 可持续 · 50–70% 适中 · 70–85% 偏高 · &gt; 100% 不可持续</td></tr></table>
           </div>
         </div>
+
+        <!-- 关键绩效指标 -->
+        <div class="tab-pane" id="pane-kpi">
+          <div class="card">
+            <h2>📊 关键绩效指标 <span class="muted" style="font-weight:400">扩展指标一览（此前分散在估值/盈利/负债页）</span></h2>
+            <div id="kpiBody"></div>
+          </div>
+        </div>
+
+        <!-- 业务分部 -->
+        <div class="tab-pane" id="pane-segments">
+          <div class="card">
+            <h2>🧩 业务分部 · 主营构成 <span class="muted" style="font-weight:400">东财 F10 主营构成 · 最新报告期</span></h2>
+            <div id="segmentsBody"></div>
+          </div>
+        </div>
+
+        <!-- 季节性 -->
+        <div class="tab-pane" id="pane-seasonality">
+          <div class="card">
+            <h2>🗓️ 季节性 · 各季度营收与利润占比 <span class="muted" style="font-weight:400">季报累计值拆为单季度</span></h2>
+            <div id="seasonalityBody"></div>
+          </div>
+        </div>
+
+        <!-- 机构持仓 -->
+        <div class="tab-pane" id="pane-holders">
+          <div class="card">
+            <h2>🏛️ 机构持仓 · 十大股东与基金持仓</h2>
+            <div id="holdersBody"></div>
+          </div>
+        </div>
+
+        <!-- 分析师 -->
+        <div class="tab-pane" id="pane-analyst">
+          <div class="card">
+            <h2>📝 分析师预测 <span class="muted" style="font-weight:400">东财研报 · 全市场最新 300 篇中筛选该股</span></h2>
+            <div id="analystBody"></div>
+          </div>
+          <div class="card">
+            <h2>📣 沟通 · 业绩说明会</h2>
+            <div id="briefingBody"></div>
+          </div>
+        </div>
+
+        <!-- 目标价格 -->
+        <div class="tab-pane" id="pane-target">
+          <div class="card">
+            <h2>🎯 目标价格 · 三种算法对照 <span class="muted" style="font-weight:400">DCF 内在价值 / EPS 预测价 / 历史 PE 中位数法</span></h2>
+            <div id="targetBody"></div>
+          </div>
+        </div>
+
+        <!-- 谁会投资 -->
+        <div class="tab-pane" id="pane-investor">
+          <div class="card">
+            <h2>🏛️ 谁会投资？ · 投资者画像匹配 <span class="muted" style="font-weight:400">规则全公开，缺失指标不计分</span></h2>
+            <div id="investorBody"></div>
+          </div>
+        </div>
+
+        <!-- 特里·史密斯 -->
+        <div class="tab-pane" id="pane-smith">
+          <div class="card">
+            <h2>⭐ 特里·史密斯方法 · 质量股检查清单 <span class="muted" style="font-weight:400">Fundsmith 选股法 · 逐项用本股数据算出</span></h2>
+            <div id="smithBody"></div>
+          </div>
+        </div>
+
+        <!-- 公司 -->
+        <div class="tab-pane" id="pane-company">
+          <div class="card">
+            <h2>🏢 公司 · 注册与管理层 <span class="muted" style="font-weight:400">东财 F10 公司基本信息</span></h2>
+            <div id="companyBody"></div>
+          </div>
+        </div>
+
+        <!-- 胜率方法库 -->
+        <div class="tab-pane" id="pane-winrate">
+          <div class="card">
+            <h2>🏆 胜率方法库 · 全球精选 10 法 + 本站实测 <span class="muted" style="font-weight:400">胜率必配盈利因子与期望，只报胜率视为验证不完整</span></h2>
+            <div id="winrateBody"></div>
+          </div>
+        </div>
+
+        <!-- 盈利因子前五 -->
+        <div class="tab-pane" id="pane-profitfactor">
+          <div class="card">
+            <h2>💰 盈利因子前五 · 全球证据最强 <span class="muted" style="font-weight:400">查不到可信数据的数字一律标“无可信数据”，不编造</span></h2>
+            <div id="profitFactorBody"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工具包面板（市场级） -->
+      <div id="toolArea" style="display:none">
+        <div class="tool-pane" id="tool-heatmap">
+          <div class="card">
+            <h2>🔥 A 股市场热力图 <span class="muted" style="font-weight:400">东财行业 / 概念板块 · 红涨绿跌</span></h2>
+            <div class="seg" id="heatmapSeg">
+              <button data-hm="industry" class="active">行业板块</button>
+              <button data-hm="concept">概念板块</button>
+            </div>
+            <div id="heatmapBody"></div>
+          </div>
+        </div>
+        <div class="tool-pane" id="tool-radar" style="display:none">
+          <div class="card">
+            <h2>🎯 低估雷达 <span class="muted" style="font-weight:400">全市场扫描 · 低 PE/PB + 高 ROE + 分红</span></h2>
+            <div id="radarBody"></div>
+          </div>
+        </div>
+        <div class="tool-pane" id="tool-compare" style="display:none">
+          <div class="card">
+            <h2>⚖️ 比较器 <span class="muted" style="font-weight:400">自选股中任选 2–4 只并排对比核心指标</span></h2>
+            <div id="compareBody"></div>
+          </div>
+        </div>
+        <div class="tool-pane" id="tool-hs300" style="display:none">
+          <div class="card">
+            <h2>📈 沪深300指数年度回报率</h2>
+            <div id="hs300RetBody"></div>
+          </div>
+          <div class="card">
+            <h2>🎯 沪深300指数目标价格 <span class="muted" style="font-weight:400">成分股聚合估值 × 盈利增速推导</span></h2>
+            <div id="hs300TargetBody"></div>
+          </div>
+        </div>
+        <div class="tool-pane" id="tool-mycharts" style="display:none">
+          <div class="card">
+            <h2>💾 我的图形 <span class="muted" style="font-weight:400">保存在本浏览器 localStorage，可命名、删除</span></h2>
+            <div id="mychartsBody"></div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -402,6 +564,8 @@
 <script src="js/api.js"></script>
 <script src="js/finance.js"></script>
 <script src="js/charts.js"></script>
+<script src="js/winrate.js"></script>
+<script src="js/profitfactor.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

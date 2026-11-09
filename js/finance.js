@@ -1002,3 +1002,261 @@ function calcWilliams(highs, lows, closes, period = 14) {
   return (hh - closes[i]) / (hh - ll) * -100;
 }
 function lastOf(arr) { return arr.length ? arr[arr.length - 1] : null; }
+
+// ============================================================
+// 新增模块计算（2026-11-09，AleInversor 缺失模块补齐）
+// 全部用本站已有数据（calcMetrics / calcExtended 的结果 + 原始季报）计算，
+// 不引入新口径、不编造数据；无数据时返回 usable:false 并写清原因。
+// ============================================================
+
+// ---------- 季节性 ----------
+// 季报行是年内累计值：Q1=一季度累计，Q2=半年累计−Q1，Q3=前三季累计−半年，Q4=全年−前三季。
+// 只统计四个季度齐全的年份；近 5 年平均占比用于判断季节性规律。
+function calcSeasonality(data) {
+  const inc = data.income || [];
+  const byYear = {};
+  for (const r of inc) {
+    const d = r.date || dateField(r);
+    const y = reportYear(d), mo = reportMonth(d);
+    if (!y || ![3, 6, 9, 12].includes(mo)) continue;
+    if (!byYear[y]) byYear[y] = {};
+    byYear[y][mo] = r;
+  }
+  const years = [];
+  for (const y of Object.keys(byYear).map(Number).sort((a, b) => a - b)) {
+    const q = byYear[y];
+    if (!q[3] || !q[6] || !q[9] || !q[12]) continue;
+    const revCum = [3, 6, 9, 12].map((mo) => num(q[mo].TOTAL_OPERATE_INCOME));
+    const profCum = [3, 6, 9, 12].map((mo) => num(q[mo].PARENT_NETPROFIT));
+    const single = (cum) => [cum[0], cum[1] - cum[0], cum[2] - cum[1], cum[3] - cum[2]];
+    const revQ = single(revCum), profQ = single(profCum);
+    const revTotal = revCum[3], profTotal = profCum[3];
+    if (!revTotal) continue;
+    years.push({
+      year: y,
+      revQ, profQ,
+      revShares: revQ.map((v) => v / revTotal),
+      profShares: profTotal ? profQ.map((v) => v / profTotal) : [null, null, null, null],
+      revTotal, profTotal,
+    });
+  }
+  if (!years.length) return { usable: false, reason: "无四个季度齐全的年份（需至少一年完整季报）" };
+  const avg = (key) => {
+    const out = [0, 0, 0, 0];
+    let n = 0;
+    for (const yr of years.slice(-5)) {
+      if (yr[key].some((v) => v == null)) continue;
+      yr[key].forEach((v, i) => { out[i] += v; });
+      n++;
+    }
+    return n ? out.map((v) => v / n) : null;
+  };
+  const avgRev = avg("revShares"), avgProf = avg("profShares");
+  const qNames = ["一季度", "二季度", "三季度", "四季度"];
+  let verdict = "";
+  if (avgRev) {
+    const peak = avgRev.indexOf(Math.max(...avgRev));
+    const spread = Math.max(...avgRev) - Math.min(...avgRev);
+    verdict = spread < 0.08
+      ? "营收季节性不明显：四个季度占比接近（极差 " + (spread * 100).toFixed(1) + " 个百分点），属全年均衡型。"
+      : "营收季节性明显：" + qNames[peak] + "占比最高（近 5 年平均 " + (avgRev[peak] * 100).toFixed(1) + "%），" +
+        qNames[avgRev.indexOf(Math.min(...avgRev))] + "占比最低（" + (avgRev[avgRev.indexOf(Math.min(...avgRev))] * 100).toFixed(1) + "%）。";
+  }
+  if (avgProf && avgProf.some((v) => v != null && (v < 0 || v > 0.6))) {
+    verdict += " 利润季节性波动更大（个别季度占比为负或超过 60%，多为费用/减值集中确认所致），看利润季节性要结合年报附注。";
+  }
+  return { usable: true, years: years.slice(-8), avgRev, avgProf, verdict };
+}
+
+// ---------- 特里·史密斯方法 ----------
+// Fundsmith 特里·史密斯的质量选股检查清单（公开方法论的 A 股落地版）：
+// 高 ROCE + 持续增长 + 自由现金流为正且转化率高 + 低杠杆 + 合理估值 + 持续分红。
+// 每项逐项算出，通过/未通过/无数据三态；阈值写在页面上，规则透明。
+function calcSmith(m, ext) {
+  const prof = ext.profitability || {};
+  const debt = ext.debt || {};
+  const growth = ext.growth || {};
+  const div = ext.dividend || {};
+  const cagr5 = (label) => {
+    const row = (growth.rows || []).find((r) => r.label === label);
+    return row && row.cagr5 && row.cagr5.value != null ? row.cagr5.value : null;
+  };
+  const items = [];
+  const add = (label, value, pass, failText, naText, note) => {
+    items.push({ label, value, status: value == null ? "na" : (pass ? "pass" : "fail"), note: value == null ? (naText || "无数据") : (pass ? "通过" : failText) + (note ? " · " + note : "") });
+  };
+  add("ROCE（TTM）≥ 15%", prof.roce, prof.roce != null && prof.roce >= 0.15,
+    "低于 15%，资本回报不够高", "无 ROCE 数据",
+    prof.roce != null ? "当前 " + (prof.roce * 100).toFixed(1) + "%" : "");
+  add("ROCE 五年中位数 ≥ 12%", prof.roceMedian5, prof.roceMedian5 != null && prof.roceMedian5 >= 0.12,
+    "五年中位数低于 12%，回报不持续", "无五年 ROCE 历史",
+    prof.roceMedian5 != null ? "中位数 " + (prof.roceMedian5 * 100).toFixed(1) + "%" : "");
+  add("自由现金流（TTM）> 0", m.ttmFcf, m.ttmFcf != null && m.ttmFcf > 0,
+    "自由现金流为负，真金白银没赚到", "无现金流数据",
+    m.ttmFcf != null ? fmtMoney(m.ttmFcf) : "");
+  add("经营现金流 / 净利润 ≥ 0.8", m.cfCoverage, m.cfCoverage != null && m.cfCoverage >= 0.8,
+    "利润现金含量低（< 0.8），利润质量存疑", "无现金流/利润数据",
+    m.cfCoverage != null ? "当前 " + m.cfCoverage.toFixed(2) : "");
+  const revC5 = cagr5("营收");
+  add("营收 5 年 CAGR ≥ 5%", revC5, revC5 != null && revC5 >= 0.05,
+    "营收 5 年复合增速低于 5%", "营收历史不足 5 年",
+    revC5 != null ? "当前 " + (revC5 * 100).toFixed(1) + "%" : "");
+  const profC5 = cagr5("归母净利润");
+  add("归母利润 5 年 CAGR ≥ 5%", profC5, profC5 != null && profC5 >= 0.05,
+    "利润 5 年复合增速低于 5%", "利润历史不足 5 年",
+    profC5 != null ? "当前 " + (profC5 * 100).toFixed(1) + "%" : "");
+  add("资产负债率 ≤ 50%", m.debtRatio, m.debtRatio != null && m.debtRatio <= 0.5,
+    "杠杆偏高（> 50%），史密斯偏好低负债", "无负债数据",
+    m.debtRatio != null ? "当前 " + (m.debtRatio * 100).toFixed(1) + "%" : "");
+  add("PE-TTM ≤ 25 倍", m.peTtm, m.peTtm != null && m.peTtm > 0 && m.peTtm <= 25,
+    "估值偏贵（> 25 倍），史密斯不追高", "无 PE 数据",
+    m.peTtm != null ? "当前 " + m.peTtm.toFixed(1) + " 倍" : "");
+  add("连续分红 ≥ 5 年", div.yearsPaying, div.yearsPaying != null && div.yearsPaying >= 5,
+    "分红历史不足 5 年", "无分红记录",
+    div.yearsPaying != null ? "有派息记录 " + div.yearsPaying + " 年" : "");
+  const judged = items.filter((i) => i.status !== "na");
+  const passed = items.filter((i) => i.status === "pass").length;
+  const verdict = judged.length < 5 ? "数据不足，无法完整判断（仅 " + judged.length + " 项可判）"
+    : passed >= 7 ? "符合特里·史密斯质量股画像（" + passed + "/" + judged.length + " 项通过）"
+    : passed >= 5 ? "部分符合（" + passed + "/" + judged.length + " 项通过），短板见未通过项"
+    : "不符合（仅 " + passed + "/" + judged.length + " 项通过），质量/估值有明显短板";
+  return { items, passed, judged: judged.length, verdict };
+}
+
+// ---------- 谁会投资？（投资者画像匹配）----------
+// 五类投资者各打 0–100 分，规则全部公开：每类由 2–4 个可算指标加权，
+// 缺失指标按“该项不计分、分母缩小”处理（与综合评分的“部分”口径一致）。
+function calcInvestorFit(m, ext) {
+  const prof = ext.profitability || {};
+  const tech = ext.technical || {};
+  const div = ext.dividend || {};
+  const growth = ext.growth || {};
+  const cagr5 = (label) => {
+    const row = (growth.rows || []).find((r) => r.label === label);
+    return row && row.cagr5 && row.cagr5.value != null ? row.cagr5.value : null;
+  };
+  const clamp = (v) => Math.max(0, Math.min(100, Math.round(v)));
+  const score = (parts) => {
+    // parts: [[得分(0-100|null), 权重]]；null 项不计入分母
+    let s = 0, w = 0;
+    for (const [v, wt] of parts) { if (v != null) { s += v * wt; w += wt; } }
+    return w ? clamp(s / w) : null;
+  };
+  const band = (v, good, bad) => {
+    // v 越小越好（PE/PB 类）：good 以下满分，bad 以上 0 分，之间线性
+    if (v == null || !isFinite(v)) return null;
+    if (v <= good) return 100;
+    if (v >= bad) return 0;
+    return (bad - v) / (bad - good) * 100;
+  };
+  const bandUp = (v, bad, good) => {
+    // v 越大越好（增速/收益率类）：good 以上满分，bad 以下 0 分，之间线性
+    if (v == null || !isFinite(v)) return null;
+    if (v >= good) return 100;
+    if (v <= bad) return 0;
+    return (v - bad) / (good - bad) * 100;
+  };
+  const profiles = [
+    {
+      key: "value", name: "价值型", desc: "低估值 + 高股息 + 盈利扎实",
+      s: score([
+        [band(m.peTtm, 12, 30), 3],
+        [band(m.pb, 1, 4), 2],
+        [bandUp(m.divYield != null ? m.divYield / 100 : null, 0.01, 0.04), 2],
+        [bandUp(m.roe, 0.05, 0.15), 2],
+      ]),
+      rules: "PE-TTM≤12 满分、≥30 零分（权重 3）；PB≤1 满分、≥4 零分（权重 2）；股息率≥4% 满分、≤1% 零分（权重 2）；ROE≥15% 满分、≤5% 零分（权重 2）",
+    },
+    {
+      key: "growth", name: "成长型", desc: "营收与利润持续高增长",
+      s: score([
+        [bandUp(m.revGrowth, 0, 0.2), 3],
+        [bandUp(m.profitGrowth, 0, 0.3), 3],
+        [bandUp(cagr5("营收"), 0, 0.15), 2],
+        [bandUp(cagr5("归母净利润"), 0, 0.2), 2],
+      ]),
+      rules: "营收 TTM 同比≥20% 满分（权重 3）；利润 TTM 同比≥30% 满分（权重 3）；营收/利润 5 年 CAGR≥15%/20% 满分（各权重 2）",
+    },
+    {
+      key: "dividend", name: "分红型", desc: "高股息 + 派息可持续 + 分红历史长",
+      s: score([
+        [bandUp(m.divYield != null ? m.divYield / 100 : null, 0.01, 0.05), 4],
+        [m.payout != null ? (m.payout <= 0.7 ? 100 : m.payout <= 1 ? 60 : 20) : null, 2],
+        [bandUp(div.yearsPaying != null ? div.yearsPaying / 10 : null, 0.2, 1), 2],
+        [bandUp(div.consecGrowthYears != null ? div.consecGrowthYears / 5 : null, 0, 1), 2],
+      ]),
+      rules: "股息率≥5% 满分、≤1% 零分（权重 4）；派息率≤70% 满分、>100% 低分（权重 2）；分红年数≥10 年满分（权重 2）；连续增长年数≥5 年满分（权重 2）",
+    },
+    {
+      key: "quality", name: "质量型", desc: "高 ROE/ROCE + 现金流好 + 低杠杆",
+      s: score([
+        [bandUp(m.roe, 0.05, 0.2), 3],
+        [bandUp(prof.roce, 0.05, 0.2), 2],
+        [bandUp(m.cfCoverage, 0.5, 1), 2],
+        [band(m.debtRatio, 0.3, 0.7), 2],
+        [bandUp(prof.fcfMargin, 0, 0.2), 1],
+      ]),
+      rules: "ROE≥20% 满分（权重 3）；ROCE≥20% 满分（权重 2）；经营现金流/净利润≥1 满分（权重 2）；资产负债率≤30% 满分、≥70% 零分（权重 2）；FCF 利润率≥20% 满分（权重 1）",
+    },
+    {
+      key: "momentum", name: "动量型", desc: "趋势向上 + 动能强 + 接近高点",
+      s: score([
+        [tech.ma20 != null && tech.ma60 != null ? (tech.ma20 > tech.ma60 ? 100 : 30) : null, 3],
+        [tech.rsi != null ? (tech.rsi >= 50 && tech.rsi <= 75 ? 100 : tech.rsi > 75 ? 50 : tech.rsi >= 40 ? 60 : 20) : null, 2],
+        [tech.ma20 != null && m.price != null ? (m.price > tech.ma20 ? 100 : 40) : null, 2],
+        [tech.high52 != null && m.price != null ? bandUp(1 - (tech.high52 - m.price) / tech.high52, 0.7, 0.95) : null, 2],
+        [tech.macd && tech.macd.dif != null && tech.macd.dea != null ? (tech.macd.dif > tech.macd.dea ? 100 : 30) : null, 1],
+      ]),
+      rules: "MA20>MA60 满分（权重 3）；RSI 50–75 满分、<40 低分（权重 2）；现价>MA20 满分（权重 2）；距 52 周高点≤5% 满分、≤30% 零分（权重 2）；MACD DIF>DEA 满分（权重 1）",
+    },
+  ];
+  const best = profiles.filter((p) => p.s != null).sort((a, b) => b.s - a.s)[0];
+  return {
+    profiles,
+    verdict: best ? "最匹配：" + best.name + "（" + best.s + " 分）— " + best.desc : "数据不足，无法判断投资者画像",
+  };
+}
+
+// ---------- 沪深300 年度回报 ----------
+// 用日线收盘价取每年最后一个交易日收盘，年度回报 = 年末收盘 / 上年末收盘 − 1。
+function calcHs300Annual(klines) {
+  if (!klines || klines.length < 30) return { usable: false, reason: "沪深300 K 线不足（仅 " + (klines ? klines.length : 0) + " 根）", rows: [] };
+  const byYear = {};
+  for (const k of klines) {
+    const y = String(k.date || "").slice(0, 4);
+    if (/^\d{4}$/.test(y)) byYear[y] = k.close; // 日线按日期升序，最后一个即年末收盘
+  }
+  const years = Object.keys(byYear).sort();
+  const rows = [];
+  for (let i = 1; i < years.length; i++) {
+    const prev = byYear[years[i - 1]], cur = byYear[years[i]];
+    if (prev && cur) rows.push({ year: years[i], close: cur, prevClose: prev, ret: cur / prev - 1 });
+  }
+  if (!rows.length) return { usable: false, reason: "K 线跨度不足一年，算不出年度回报", rows: [] };
+  const rets = rows.map((r) => r.ret);
+  const cagr = Math.pow(byYear[years[years.length - 1]] / byYear[years[0]], 1 / rows.length) - 1;
+  return {
+    usable: true, rows: rows.reverse(),
+    years: years.length, fromYear: years[0], toYear: years[years.length - 1],
+    avgRet: rets.reduce((a, b) => a + b, 0) / rets.length,
+    cagr, upYears: rets.filter((r) => r > 0).length, downYears: rets.filter((r) => r <= 0).length,
+    note: klines.source === "tencent" ? "K 线来源：腾讯（仅约 2.5 年），年度回报只覆盖近 2 年；东财长 K 线拉取失败时请重试。" : klines.source === "tencent-range" ? "K 线来源：腾讯（按 2 年分段拉取，2010 年至今）" : "K 线来源：东财（前复权日线）",
+  };
+}
+
+// ---------- 沪深300 目标价格 ----------
+// 目标点位 = 当前点位 × (1 + 盈利增速 g) × (目标 PE / 当前加权 PE)
+// g：沪深300 成分股（按市值取前 50 只）归母净利润 TTM 同比聚合（利润加权）；
+// 当前加权 PE：成分股市值加权 PE（调和口径：Σ市值 / Σ(市值/PE)，剔除 PE≤0）；
+// 目标 PE：用户可调，默认 = 当前加权 PE（即“估值不变、只赚盈利增长的钱”情景）。
+function calcHs300Target(price, peWeighted, growth, targetPe) {
+  if (price == null || !peWeighted || peWeighted <= 0) return { usable: false, reason: "无当前点位或加权 PE" };
+  if (growth == null) return { usable: false, reason: "无盈利增速 g（成分股利润数据未取到）" };
+  if (!targetPe || targetPe <= 0) return { usable: false, reason: "目标 PE 无效" };
+  const target = price * (1 + growth) * (targetPe / peWeighted);
+  return {
+    usable: true, target,
+    upside: target / price - 1,
+    formula: "目标点位 = " + price.toFixed(2) + " × (1 + " + (growth * 100).toFixed(1) + "%) × (" + targetPe.toFixed(1) + " ÷ " + peWeighted.toFixed(1) + ")",
+  };
+}

@@ -181,8 +181,14 @@ document.addEventListener("click", (e) => {
 async function renderMovers() {
   const ul = document.getElementById("moversList");
   try {
-    let movers = await fetchMovers(12);
-    if (!movers.length) movers = await fetchMovers(12);
+    // 东财 clist 偶发 502（2026-11-09 14:07 验证时拉取失败，14:12 同接口实测已通）：
+    // 最多试 3 次，每次间隔 800ms，仍失败才显示暂不可用。
+    let movers = [];
+    for (let attempt = 0; attempt < 3 && !movers.length; attempt++) {
+      try { movers = await fetchMovers(12); } catch (e) { movers = []; }
+      if (!movers.length && attempt < 2) await new Promise((r) => setTimeout(r, 800));
+    }
+    if (!movers.length) throw new Error("东财涨幅榜连续 3 次无数据");
     ul.innerHTML = movers.map((s) =>
       `<li data-code="${esc(s.code)}">
         <span class="wl-name">${esc(s.name)}</span>
@@ -198,14 +204,48 @@ async function renderMovers() {
 
 // ---------- 标签页 ----------
 const CHART_TABS = { tech: drawTech, history: drawHistoryExt, drawdown: drawDrawdownPane, dividend: drawDividend, profitability: drawProfitability };
+// 懒加载标签（首次打开时才拉数据）：分析师研报、行业历史
+let analystLoadedFor = null;
+let sectorHistLoadedFor = null;
+let winrateLoaded = false;
+let profitLoaded = false;
 document.getElementById("tabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tab]");
   if (!btn) return;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b === btn));
   document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + btn.dataset.tab));
+  // 回到个股标签时隐藏工具包区
+  document.getElementById("toolArea").style.display = "none";
+  document.getElementById("detailArea").style.display = "block";
+  document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
   const fn = CHART_TABS[btn.dataset.tab];
   if (fn && currentData) fn();
+  if (btn.dataset.tab === "analyst" && currentCode && analystLoadedFor !== currentCode) renderAnalyst(currentCode);
+  if (btn.dataset.tab === "sector" && currentCode && sectorHistLoadedFor !== currentCode) renderSectorHist(currentCode);
+  if (btn.dataset.tab === "winrate" && !winrateLoaded) { winrateLoaded = true; renderWinrate(); }
+  if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
 });
+// 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
+const TOOL_LOADERS = { heatmap: () => renderHeatmap("industry"), radar: renderRadar, compare: renderCompare, hs300: renderHs300, mycharts: renderMycharts };
+const toolLoaded = {};
+document.getElementById("toolTabs").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tool]");
+  if (!btn) return;
+  document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".tab-pane").forEach((p) => p.classList.remove("active"));
+  document.getElementById("detailArea").style.display = "none";
+  document.getElementById("toolArea").style.display = "block";
+  document.querySelectorAll(".tool-pane").forEach((p) => { p.style.display = p.id === "tool-" + btn.dataset.tool ? "block" : "none"; });
+  if (!toolLoaded[btn.dataset.tool]) { toolLoaded[btn.dataset.tool] = true; TOOL_LOADERS[btn.dataset.tool](); }
+});
+document.getElementById("heatmapSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-hm]");
+  if (!btn) return;
+  document.querySelectorAll("#heatmapSeg button").forEach((b) => b.classList.toggle("active", b === btn));
+  renderHeatmap(btn.dataset.hm);
+});
+document.getElementById("saveChartBtn").addEventListener("click", saveCurrentChart);
 document.getElementById("klineSeg").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-klt]");
   if (!btn) return;
@@ -252,6 +292,18 @@ async function loadStock(code) {
   renderSector(data, m, ext);
   renderCyclicality(data, m, ext);
   renderCalendar(data);
+  renderKpi(data, m, ext);
+  renderSegments(data);
+  renderSeasonality(data);
+  renderHolders(data);
+  renderTarget(data, m, ext);
+  renderInvestor(data, m, ext);
+  renderSmith(data, m, ext);
+  renderCompany(data, m);
+  analystLoadedFor = null;
+  sectorHistLoadedFor = null;
+  if (document.querySelector("#pane-analyst.active")) renderAnalyst(code);
+  if (document.querySelector("#pane-sector.active")) renderSectorHist(code);
   drawTech();
   drawHistoryExt();
   drawDrawdownPane();
@@ -357,18 +409,28 @@ function renderMetrics(m) {
 function renderOverview(data, m, ext) {
   const q = data.quote || {};
   const na = ext.na || {};
+  // 公司简介：东财 F10 ORG_PROFILE（fetchCompanyProfile，2026-11-09 实测紫金有 1739 字）；
+  // ETF 无此表记录时 data.profile 为 null，仍显示暂不可用，不拖垮整页。
+  const _prof = (data.profile && data.profile.ORG_PROFILE || "").replace(/\s+/g, " ").trim();
+  const profileText = _prof ? (_prof.length > 240 ? _prof.slice(0, 240) + "……" : _prof) : "暂不可用 — 该标的无公司简介数据（ETF 等无 F10 记录）";
+  const pf = data.profile || {};
   const rows = [
     ["公司名称", q.name || (data.tx && data.tx.name) || "—"],
     ["代码", currentCode + " · " + (txMarket(currentCode) === "sh" ? "上交所" : txMarket(currentCode) === "sz" ? "深交所" : "北交所")],
     ["行业", m.industry || "—"],
     ["地域", q.region || "—"],
     ["概念/题材", m.concepts || "—"],
+    ["上市日期", pf.LISTING_DATE ? String(pf.LISTING_DATE).slice(0, 10) : "—"],
+    ["成立日期", pf.FOUND_DATE ? String(pf.FOUND_DATE).slice(0, 10) : "—"],
+    ["主营业务", pf.MAIN_BUSINESS || "—"],
+    ["员工数", pf.EMP_NUM != null ? Number(pf.EMP_NUM).toLocaleString("zh-CN") + " 人" : "—"],
+    ["实际控制人", pf.ACTUAL_HOLDER || "—"],
     ["总市值", fmtMoney(m.totalMcap)],
     ["流通市值", fmtMoney(m.floatMcap)],
     ["总股本", m.totalShares ? fmtMoney(m.totalShares) + " 股" : "—"],
     ["每股净资产 BPS", data.income && data.income[0] ? num2(num(data.income[0].BPS)) + " 元" : "—"],
     ["加权 ROE（最新年报）", data.income && data.income[0] ? pct1(num(data.income[0].WEIGHTAVG_ROE) / 100) : "—"],
-    ["公司描述", "暂不可用 — 公司简介、CEO、员工数、官网未从东财/腾讯公开接口获得"],
+    ["公司描述", profileText],
     ["Beta vs 沪深300", ext.cyclicality.beta != null ? ext.cyclicality.beta.toFixed(2) : "暂不可用 — " + (na.beta || "数据不足")],
   ];
   document.getElementById("ovProfile").innerHTML =
@@ -670,7 +732,8 @@ function drawTech() {
       `<table class="tbl" style="margin-top:10px"><tr><th>关键价位</th><th>数值</th></tr>
       <tr><td>近 60 日阻力（最高）</td><td class="num">${num2(t.resist60)}</td></tr>
       <tr><td>近 60 日支撑（最低）</td><td class="num">${num2(t.support60)}</td></tr>
-      <tr><td>52 周最高 / 最低</td><td class="num">${num2(t.high52)} / ${num2(t.low52)}</td></tr></table>`;
+      <tr><td>52 周最高 / 最低</td><td class="num">${num2(t.high52)} / ${num2(t.low52)}</td></tr></table>` +
+      `<p class="muted" style="margin-top:10px">胜率证据：RSI(14)&lt;30 是胜率方法库第 1 名（Piotroski F≥7 + RSI&lt;30，A股季度胜率 53.4%）的入场条件之一，单用超卖抄底无胜率证据；RSI(2)&lt;10 短期超卖交易胜率 71.4%，但近期复现未通过门槛，置信度已下调。技术信号本身不附胜率——图型信号的实测胜率（阳包阴 36.3%、单针探底 47.1% 等，附盈利因子与期望）见「胜率方法库 · 本站实测」。</p>`;
   }
 }
 
@@ -860,7 +923,7 @@ function renderSector(data, m, ext) {
     <tr><td>PE-TTM / PB</td><td class="num">${num2(m.peTtm)} / ${num2(m.pb)}</td></tr>
     <tr><td>ROE（TTM）</td><td class="num">${pct1(m.roe)}</td></tr>
     <tr><td>股息率</td><td class="num">${m.divYield != null ? m.divYield.toFixed(2) + "%" : "—"}</td></tr></table>
-    <p class="muted" style="margin-top:10px">行业内同行对比（公司 vs 行业中位数、行业 PER vs 历史中位数）：<span class="badge">暂不可用</span> 行业成分股名单与行业汇总数据未从东财/腾讯免费接口获得。作为替代，下方“周期性”给出 vs 沪深300 的 Beta 与相对表现。</p>`;
+    <p class="muted" style="margin-top:10px">行业内同行对比（公司 vs 行业中位数、行业 PER vs 历史中位数）：<span class="badge">暂不可用</span> 行业成分股名单与行业汇总数据未从东财/腾讯免费接口获得。作为替代，下方“行业及其历史”给出行业指数走势与年度回报；“周期性”给出 vs 沪深300 的 Beta 与相对表现。</p>`;
 }
 
 // ---------- 周期性 ----------
@@ -915,6 +978,652 @@ async function renderCalendar(data) {
     html += `<p class="muted">自选股待披露日历暂不可用（${esc(e.message || e)}）。</p>`;
     el.innerHTML = html;
   }
+}
+
+// ============================================================
+// 新增模块渲染（2026-11-09，AleInversor 缺失模块补齐）
+// ============================================================
+function shareBar(pct) {
+  const w = Math.max(0, Math.min(100, (pct || 0) * 100));
+  return `<div class="dim-bar"><i style="width:${w.toFixed(1)}%"></i></div>`;
+}
+
+// ---------- 关键绩效指标 ----------
+function renderKpi(data, m, ext) {
+  const el = document.getElementById("kpiBody");
+  const v = ext.valuation || {}, p = ext.profitability || {}, d = ext.debt || {};
+  const row = (label, value, note) => `<tr><td>${esc(label)}</td><td class="num">${esc(value)}</td><td style="text-align:left" class="muted">${esc(note || "")}</td></tr>`;
+  let html = "";
+  html += `<h3>估值</h3><table class="tbl"><tr><th>指标</th><th>数值</th><th>说明</th></tr>`;
+  html += row("PS（市销率）", num2(v.ps), "总市值 / 营收 TTM");
+  html += row("P/FCF", num2(v.pFcf), "总市值 / 自由现金流 TTM");
+  html += row("EV/EBIT", num2(v.evEbit), "EV / EBIT（TTM）");
+  html += row("EV/FCF", num2(v.evFcf), "EV / 自由现金流 TTM");
+  html += row("EV/营收", num2(v.evSales), "EV / 营收 TTM");
+  html += row("盈利率 Earnings Yield", v.earnYield != null ? v.earnYield.toFixed(2) + "%" : "—", "1 / PE-TTM");
+  html += row("FCF 收益率", v.fcfYield != null ? v.fcfYield.toFixed(2) + "%" : "—", "FCF(TTM) / 总市值");
+  html += row("PEG", num2(v.peg), "PE-TTM / 利润 TTM 同比增速（%）");
+  html += `</table><h3>盈利与回报</h3><table class="tbl"><tr><th>指标</th><th>数值</th><th>说明</th></tr>`;
+  html += row("毛利率（TTM）", pct1(p.grossMargin), "");
+  html += row("EBIT 利润率（TTM）", pct1(p.ebitMargin), "");
+  html += row("净利率（TTM）", pct1(p.netMargin), "");
+  html += row("FCF 利润率（TTM）", pct1(p.fcfMargin), "");
+  html += row("ROE（TTM）", pct1(m.roe), "");
+  html += row("ROA（TTM）", pct1(p.roa), "");
+  html += row("ROIC（TTM）", pct1(p.roic), "NOPAT / 投入资本（代理口径）");
+  html += row("ROCE（TTM）", pct1(p.roce), "EBIT / 投入资本（代理口径）");
+  html += row("ROE 五年中位数", pct1(p.roeMedian5), "年报加权 ROE");
+  html += row("ROIC 五年中位数", pct1(p.roicMedian5), "年报口径");
+  html += row("ROCE 五年中位数", pct1(p.roceMedian5), "年报口径");
+  html += `</table><h3>负债与偿债</h3><table class="tbl"><tr><th>指标</th><th>数值</th><th>说明</th></tr>`;
+  html += row("资产负债率", pct1(m.debtRatio), "最新一期");
+  html += row("总负债 / 净资产", num2(d.deRatio), "");
+  html += row("净负债", fmtMoney(d.netDebt), "总负债 − 货币资金（负值=净现金）");
+  html += row("净负债 / FCF", num2(d.netDebtFcf), "");
+  html += row("FCF / 总负债", num2(d.fcfToDebt), "");
+  html += row("流动比率", num2(d.currentRatio), "");
+  html += row("利息保障倍数", num2(d.interestCoverage), "EBIT / 财务费用（仅当财务费用>0）");
+  html += `</table><p class="muted" style="margin-top:8px">EV/EBITDA、速动比率、现金比率暂不可用（折旧摊销与流动资产/负债未单独披露），原因见估值/负债页。全部指标口径见“打分指南”。</p>`;
+  el.innerHTML = html;
+}
+
+// ---------- 业务分部 ----------
+function renderSegments(data) {
+  const el = document.getElementById("segmentsBody");
+  const rows = data.mainop || [];
+  if (data.errors && data.errors.mainop) {
+    el.innerHTML = `<p class="muted">主营构成暂不可用（${esc(data.errors.mainop)}）。</p>`;
+    return;
+  }
+  if (!rows.length) {
+    el.innerHTML = `<p class="muted">暂无主营构成数据（该标的无 F10 主营构成记录，如 ETF；或接口本次未返回）。</p>`;
+    return;
+  }
+  const latestDate = rows.map((r) => String(r.REPORT_DATE || "").slice(0, 10)).sort().reverse()[0];
+  const latest = rows.filter((r) => String(r.REPORT_DATE || "").slice(0, 10) === latestDate);
+  const typeName = { 1: "按行业", 2: "按产品", 3: "按地区" };
+  let html = `<p class="muted" style="margin-bottom:10px">报告期：${esc(latestDate)} · 数据：东财 F10 主营构成（RPT_F10_FN_MAINOP）</p>`;
+  const groups = {};
+  for (const r of latest) {
+    const t = Number(r.MAINOP_TYPE);
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(r);
+  }
+  for (const t of Object.keys(groups).map(Number).sort()) {
+    const items = groups[t].slice().sort((a, b) => num(b.MAIN_BUSINESS_INCOME) - num(a.MAIN_BUSINESS_INCOME));
+    html += `<h3>${esc(typeName[t] || "其他")}</h3><table class="tbl"><tr><th>构成</th><th>营业收入</th><th>收入占比</th><th>营业利润</th><th>利润占比</th><th>毛利率</th></tr>`;
+    for (const r of items) {
+      const revShare = r.MBI_RATIO != null ? num(r.MBI_RATIO) : null;
+      const profShare = r.MBR_RATIO != null ? num(r.MBR_RATIO) : null;
+      const dash = "—";
+      html += `<tr><td>${esc(r.ITEM_NAME || "—")}</td><td class="num">${r.MAIN_BUSINESS_INCOME != null ? fmtMoney(num(r.MAIN_BUSINESS_INCOME)) : dash}</td><td class="num">${revShare != null ? (revShare * 100).toFixed(1) + "%" : dash}</td><td class="num">${r.MAIN_BUSINESS_RPOFIT != null ? fmtMoney(num(r.MAIN_BUSINESS_RPOFIT)) : dash}</td><td class="num">${profShare != null ? (profShare * 100).toFixed(1) + "%" : dash}</td><td class="num">${r.GROSS_RPOFIT_RATIO != null ? (num(r.GROSS_RPOFIT_RATIO) * 100).toFixed(1) + "%" : dash}</td></tr>`;
+      if (revShare != null) html += `<tr><td colspan="6" style="padding-top:0;border-bottom:1px solid var(--line)">${shareBar(revShare)}</td></tr>`;
+    }
+    html += `</table>`;
+  }
+  el.innerHTML = html;
+}
+
+// ---------- 季节性 ----------
+function renderSeasonality(data) {
+  const el = document.getElementById("seasonalityBody");
+  const s = calcSeasonality(data);
+  if (!s.usable) {
+    el.innerHTML = `<p class="muted">季节性暂不可用：${esc(s.reason)}。</p>`;
+    return;
+  }
+  const pct = (v) => (v == null ? "—" : (v * 100).toFixed(1) + "%");
+  let html = `<p style="margin-bottom:10px"><b>${esc(s.verdict)}</b></p>`;
+  html += `<table class="tbl"><tr><th>年份</th><th>Q1 营收占比</th><th>Q2 营收占比</th><th>Q3 营收占比</th><th>Q4 营收占比</th><th>Q1 利润占比</th><th>Q2 利润占比</th><th>Q3 利润占比</th><th>Q4 利润占比</th></tr>`;
+  for (const y of [...s.years].reverse()) {
+    html += `<tr><td>${y.year}</td>` +
+      y.revShares.map((v) => `<td class="num">${pct(v)}</td>`).join("") +
+      y.profShares.map((v) => `<td class="num">${pct(v)}</td>`).join("") + `</tr>`;
+  }
+  if (s.avgRev) {
+    html += `<tr><td><b>近 5 年平均</b></td>` +
+      s.avgRev.map((v) => `<td class="num"><b>${pct(v)}</b></td>`).join("") +
+      (s.avgProf || [null, null, null, null]).map((v) => `<td class="num"><b>${pct(v)}</b></td>`).join("") + `</tr>`;
+  }
+  html += `</table><p class="muted" style="margin-top:8px">算法：季报行是年内累计值，单季度 = 本期累计 − 上期累计（Q1 即一季度累计）。利润占比可能为负或超过 100%（个别季度亏损或费用集中确认），属正常现象。样本：${s.years.length} 个完整年份。</p>`;
+  el.innerHTML = html;
+}
+
+// ---------- 机构持仓 ----------
+function renderHolders(data) {
+  const el = document.getElementById("holdersBody");
+  const mkt = txMarket(currentCode);
+  const emUrl = "https://quote.eastmoney.com/" + mkt + currentCode + ".html";
+  el.innerHTML =
+    `<p>十大股东、十大流通股东、基金持仓与机构持股比例：<span class="badge">暂不可用</span></p>
+     <p class="muted" style="margin-top:8px">原因（2026-11-09 实测）：东财 F10 十大股东接口（emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageAjax，内含十大股东 sdgd、十大流通股东 sdltgd、股东户数 gdrs、基金持仓 jjcg、机构持股汇总 jgcc）curl 能返回数据，但响应不带 Access-Control-Allow-Origin，浏览器 fetch 会被 CORS 拦截，纯静态站无法直接调用；东财数据中心没有十大股东/基金持仓表（RPT_F10_MAIN_HOLDER、RPT_FUND_HOLD_STOCK、RPT_MUTUAL_HOLD_STOCK 均报“报表配置不存在”）；雪球持仓接口对本机出口 IP 返回 403 且需登录态。本站不造数据、不放过时快照。</p>
+     <p style="margin-top:10px">手动查看：<a href="${emUrl}" target="_blank" rel="noopener">东财个股页（F10 → 股东研究）</a> · <a href="https://www.cninfo.com.cn/new/index" target="_blank" rel="noopener">巨潮资讯</a></p>
+     <p class="muted" style="margin-top:8px">若日后东财放开该接口 CORS 或找到新的免费浏览器源，本页会直接接回十大股东表（含社保/QFII/知名公募私募/牛散标注）。</p>`;
+}
+
+// ---------- 分析师 ----------
+function renderBriefing() {
+  document.getElementById("briefingBody").innerHTML =
+    `<p>业绩说明会 / 投资者关系活动记录：<span class="badge">暂不可用</span></p>
+     <p class="muted" style="margin-top:8px">原因：上证 e 互动、深交所互动易、巨潮资讯均无公开免费的 JSON 接口（需登录或页面抓取，静态站无法直接调用）；东财/腾讯免费接口不提供业绩说明会日程。本站不编造会议记录。</p>
+     <p style="margin-top:10px">手动查看：<a href="https://sns.sseinfo.com/" target="_blank" rel="noopener">上证 e 互动</a> · <a href="https://irm.cninfo.com.cn/" target="_blank" rel="noopener">深交所互动易</a> · <a href="https://www.cninfo.com.cn/new/index" target="_blank" rel="noopener">巨潮资讯</a></p>
+     <p class="muted" style="margin-top:8px">上方“预期”页的业绩预告是 A 股对应的官方预期披露，可作为替代参考。</p>`;
+}
+async function renderAnalyst(code) {
+  renderBriefing();
+  const el = document.getElementById("analystBody");
+  el.innerHTML = `<div class="loading">正在拉取全市场最新研报…</div>`;
+  try {
+    const reports = await fetchReports(code, 90, 3);
+    analystLoadedFor = code;
+    if (!reports.length) {
+      el.innerHTML = `<p class="muted">全市场最新 300 篇研报中未找到该股（约最近 3 天窗口）。不代表该股没有研报——冷门股研报密度低，或最新研报不在最近 3 天内。可去东财研报中心手动检索。</p>`;
+      return;
+    }
+    const latest = reports[0];
+    const ratings = {};
+    for (const r of reports) { if (r.rating) ratings[r.rating] = (ratings[r.rating] || 0) + 1; }
+    const ratingLine = Object.entries(ratings).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + v + " 篇").join(" · ") || "无评级信息";
+    const epsRow = (label, eps, pe) => `<tr><td>${label}</td><td class="num">${eps != null ? eps.toFixed(2) + " 元" : "—"}</td><td class="num">${pe != null ? pe.toFixed(1) + " 倍" : "—"}</td></tr>`;
+    let html = `<p style="margin-bottom:10px"><b>最新研报评级：${esc(latest.rating || "—")}</b>（${esc(latest.org || "")}，${esc(latest.publishDate)}）· 全市场最新 300 篇中该股共 ${reports.length} 篇研报：${esc(ratingLine)}</p>`;
+    html += `<h3>分析师 EPS 预测（最新研报）</h3><table class="tbl"><tr><th>预测期</th><th>EPS</th><th>对应 PE</th></tr>`;
+    html += epsRow("当年", latest.epsThisYear, latest.peThisYear);
+    html += epsRow("明年", latest.epsNextYear, latest.peNextYear);
+    html += epsRow("后年", latest.epsNext2Year, latest.peNext2Year);
+    html += `</table><p class="muted" style="margin-top:6px">EPS/PE 预测来自研报原文（东财研报库 predict* 字段），非本站推算；同一家机构不同时间预测会变，以最新一篇为准。分析师目标价：${latest.aimPriceT != null ? "最新研报给出 " + latest.aimPriceT + " 元" : "最新研报未给出目标价（indvAimPrice 为空）"}。</p>`;
+    html += `<h3>研报列表（全市场最新 300 篇中该股）</h3><table class="tbl"><tr><th>发布日</th><th>机构</th><th>标题</th><th>评级</th></tr>`;
+    html += reports.slice(0, 20).map((r) =>
+      `<tr><td>${esc(r.publishDate)}</td><td>${esc(r.org || "—")}</td><td style="text-align:left">${esc(r.title || "—")}</td><td>${esc(r.rating || "—")}</td></tr>`).join("");
+    html += `</table><p class="muted" style="margin-top:8px">数据：东财研报列表（reportapi），按 stockCode 客户端筛选；覆盖说明见接口注释。分析师情绪 = 研报评级分布（买入/增持/中性/减持篇数），不是本站打分。</p>`;
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = `<p class="muted">研报暂不可用（${esc(e.message || e)}）。<a href="#" id="analystRetry">重试</a></p>`;
+    document.getElementById("analystRetry").addEventListener("click", (ev) => { ev.preventDefault(); analystLoadedFor = null; renderAnalyst(code); });
+  }
+}
+
+// ---------- 目标价格 ----------
+function renderTarget(data, m, ext) {
+  const el = document.getElementById("targetBody");
+  const price = m.price;
+  const dcfInput = {
+    wacc: (parseFloat(document.getElementById("dcfWacc").value) || 8) / 100,
+    growth: document.getElementById("dcfGrowth").value.trim() === "" ? null : parseFloat(document.getElementById("dcfGrowth").value) / 100,
+    terminalGrowth: (parseFloat(document.getElementById("dcfTerminal").value) || 2) / 100,
+    growthYears: parseInt(document.getElementById("dcfYears").value, 10) || 5,
+  };
+  const dcf = calcDCF(m, dcfInput);
+  const proj = ext.epsProjection(
+    parseFloat(document.getElementById("projGrowth").value) || 10,
+    parseInt(document.getElementById("projYears").value, 10) || 3,
+    parseFloat(document.getElementById("projExitPe").value) || 22
+  );
+  const peMed = ext.peHistory && ext.peHistory.median5;
+  const peTarget = (m.ttmEps != null && m.ttmEps > 0 && peMed != null) ? m.ttmEps * peMed : null;
+  const row = (method, target, upside, note) =>
+    `<tr><td>${esc(method)}</td><td class="num">${target != null ? target.toFixed(2) + " 元" : "—"}</td><td class="num ${chgClass(upside != null ? upside * 100 : 0)}">${upside != null ? (upside >= 0 ? "+" : "") + (upside * 100).toFixed(1) + "%" : "—"}</td><td style="text-align:left" class="muted">${esc(note)}</td></tr>`;
+  let html = `<table class="tbl"><tr><th>方法</th><th>目标价</th><th>较现价</th><th>说明</th></tr>`;
+  html += row("DCF 内在价值", dcf.usable ? dcf.perShare : null, dcf.usable ? dcf.upside : null,
+    dcf.usable ? "自由现金流折现，WACC " + (dcf.wacc * 100).toFixed(1) + "%，g " + (dcf.growth * 100).toFixed(1) + "%（参数与估值页 DCF 计算器同步）" : "暂不可用：" + dcf.reason);
+  html += row("EPS 预测价", proj.usable ? proj.priceN : null, proj.usable ? proj.upside : null,
+    proj.usable ? "EPS(TTM) " + proj.eps0.toFixed(2) + " 元，年增速 " + (proj.growth * 100).toFixed(1) + "%，" + proj.years + " 年后 × 退出 PE " + proj.exitPe + " 倍（参数与估值页 EPS 预测同步）" : "暂不可用：" + proj.reason);
+  html += row("历史 PE 中位数法", peTarget, peTarget != null && price ? peTarget / price - 1 : null,
+    peMed != null ? "EPS(TTM) " + (m.ttmEps != null ? m.ttmEps.toFixed(2) : "—") + " 元 × 近 5 年 PE 中位数 " + peMed.toFixed(1) + " 倍" : "暂不可用：无近 5 年 PE 中位数或 TTM EPS");
+  html += row("分析师目标价", null, null, "见“分析师”页：最新研报的 indvAimPrice 字段，多数研报不给目标价；无免费一致预期目标价数据源");
+  html += `</table><p class="muted" style="margin-top:8px">现价 ${price != null ? price.toFixed(2) + " 元" : "—"}。三种方法口径不同：DCF 看现金流、EPS 预测价看盈利增速、PE 中位数法看估值回归；不要只取最高值当目标价。</p>`;
+  el.innerHTML = html;
+}
+
+// ---------- 谁会投资 ----------
+function renderInvestor(data, m, ext) {
+  const el = document.getElementById("investorBody");
+  const fit = calcInvestorFit(m, ext);
+  let html = `<p style="margin-bottom:10px"><b>${esc(fit.verdict)}</b></p><div class="score-dims">`;
+  for (const p of fit.profiles) {
+    const w = p.s != null ? p.s : 0;
+    html += `<div class="dim-row">
+      <div class="dim-top"><b>${esc(p.name)} · ${esc(p.desc)}</b><span>${p.s != null ? p.s + " / 100" : "数据不足"}</span></div>
+      <div class="dim-bar"><i style="width:${w}%;background:${p.s != null && p.s >= 70 ? "#1a9e54" : p.s != null && p.s >= 40 ? "#2b6cb0" : "#e5484d"}"></i></div>
+      <div class="dim-detail">${esc(p.rules)}</div>
+    </div>`;
+  }
+  html += `</div><p class="muted" style="margin-top:8px">算法：每类由 2–5 个可算指标加权，缺失指标不计分（分母缩小）；分数是画像匹配度，不是推荐度。高分只说明该类投资者更可能关注这只票，不代表应该买入。</p>`;
+  el.innerHTML = html;
+}
+
+// ---------- 特里·史密斯 ----------
+function renderSmith(data, m, ext) {
+  const el = document.getElementById("smithBody");
+  const s = calcSmith(m, ext);
+  const badge = (st) => st === "pass" ? `<span class="badge done">通过</span>` : st === "fail" ? `<span class="badge" style="background:var(--red-soft);color:#991b1b">未通过</span>` : `<span class="badge">无数据</span>`;
+  let html = `<p style="margin-bottom:10px"><b>${esc(s.verdict)}</b></p>
+    <p class="muted" style="margin-bottom:10px">方法来源：Fundsmith 特里·史密斯的质量选股法——只买高资本回报、持续增长、现金流真实、低杠杆、估值合理的公司，并长期持有。以下 9 项全部用本股数据逐项算出，阈值公开：</p>
+    <table class="tbl"><tr><th>检查项</th><th>结论</th><th>依据</th></tr>`;
+  for (const it of s.items) {
+    html += `<tr><td>${esc(it.label)}</td><td>${badge(it.status)}</td><td style="text-align:left" class="muted">${esc(it.note)}</td></tr>`;
+  }
+  html += `</table><p class="muted" style="margin-top:8px">通过 ${s.passed} / ${s.judged} 项（可判项）。ROIC/ROCE 的投入资本用“净资产 + 总负债”代理（见打分指南）；分红年数按有派息记录的年份数计。</p>`;
+  el.innerHTML = html;
+}
+
+// ---------- 公司 ----------
+function renderCompany(data, m) {
+  const el = document.getElementById("companyBody");
+  const pf = data.profile || null;
+  if (!pf) {
+    el.innerHTML = `<p class="muted">公司信息暂不可用（该标的无 F10 公司基本信息记录，如 ETF；或接口本次未返回${data.errors && data.errors.profile ? "：" + esc(data.errors.profile) : ""}）。</p>`;
+    return;
+  }
+  const rows = [
+    ["公司全称", pf.ORG_NAME],
+    ["英文名称", pf.ORG_NAME_EN],
+    ["曾用名", pf.FORMERNAME],
+    ["证券类型", pf.SECURITY_TYPE],
+    ["上市交易所", pf.TRADE_MARKET],
+    ["上市日期", pf.LISTING_DATE ? String(pf.LISTING_DATE).slice(0, 10) : null],
+    ["成立日期", pf.FOUND_DATE ? String(pf.FOUND_DATE).slice(0, 10) : null],
+    ["主营业务", pf.MAIN_BUSINESS],
+    ["经营范围", pf.BUSINESS_SCOPE],
+    ["证监会行业", pf.INDUSTRYCSRC1],
+    ["东财三级行业", pf.BOARD_NAME_LEVEL],
+    ["实际控制人", pf.ACTUAL_HOLDER],
+    ["董事长", pf.CHAIRMAN],
+    ["总经理", pf.PRESIDENT],
+    ["法人代表", pf.LEGAL_PERSON],
+    ["董事会秘书", pf.SECRETARY],
+    ["证券事务代表", pf.SECPRESENT],
+    ["独立董事", pf.INDEDIRECTORS],
+    ["注册资本", pf.REG_CAPITAL != null ? Number(pf.REG_CAPITAL).toLocaleString("zh-CN") + " 万元" : null],
+    ["员工数", pf.EMP_NUM != null ? Number(pf.EMP_NUM).toLocaleString("zh-CN") + " 人" : null],
+    ["注册地址", pf.REG_ADDRESS],
+    ["办公地址", pf.ADDRESS],
+    ["联系电话", pf.ORG_TEL],
+    ["邮箱", pf.ORG_EMAIL],
+    ["网址", pf.ORG_WEB],
+    ["审计机构", pf.ACCOUNTFIRM_NAME],
+    ["律师事务所", pf.LAW_FIRM],
+  ];
+  el.innerHTML = `<table class="tbl">` + rows.map(([k, v]) =>
+    `<tr><td>${esc(k)}</td><td style="text-align:left">${esc(v != null && v !== "" ? v : "—")}</td></tr>`).join("") + `</table>` +
+    (pf.ORG_PROFILE ? `<h3>公司简介（全文）</h3><p style="font-size:14px;line-height:1.8">${esc(String(pf.ORG_PROFILE).replace(/\s+/g, " ").trim())}</p>` : "");
+}
+
+// ---------- 行业历史（行业页懒加载）----------
+async function renderSectorHist(code) {
+  const el = document.getElementById("sectorHistBody");
+  el.innerHTML = `<div class="loading">正在加载行业指数…</div>`;
+  try {
+    const boards = await fetchBoards("industry", 500);
+    if (!boards.length) throw new Error("行业板块列表无数据");
+    const pf = currentData && currentData.profile;
+    const level = pf && pf.BOARD_NAME_LEVEL ? String(pf.BOARD_NAME_LEVEL) : "";
+    const levelParts = level.split("-").filter(Boolean);
+    const m = currentMetrics || {};
+    // 优先匹配东财三级行业中间段（如“白酒Ⅱ”），其次匹配行情行业名
+    let def = boards.find((b) => levelParts.some((p) => p && b.name === p))
+      || boards.find((b) => m.industry && b.name.includes(m.industry))
+      || boards.find((b) => m.industry && m.industry.includes(b.name))
+      || boards[0];
+    const opts = [...boards].sort((a, b) => (b.changePct || 0) - (a.changePct || 0));
+    el.innerHTML = `<div class="dcf-grid" style="grid-template-columns:1fr auto">
+        <div class="dcf-field"><label>选择行业指数（按今日涨跌幅排序）</label>
+        <select id="sectorBoardSel" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+        ${opts.map((b) => `<option value="${esc(b.code)}" ${b.code === def.code ? "selected" : ""}>${esc(b.name)}（${b.changePct != null ? (b.changePct > 0 ? "+" : "") + b.changePct.toFixed(2) + "%" : "—"}）</option>`).join("")}
+        </select></div>
+        <div class="dcf-field"><label>&nbsp;</label><button class="primary" id="sectorHistBtn" style="padding:8px 16px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px">加载走势</button></div>
+      </div>
+      <div id="sectorHistDetail"></div>`;
+    const loadBoard = async (boardCode) => {
+      const det = document.getElementById("sectorHistDetail");
+      const board = boards.find((b) => b.code === boardCode) || def;
+      det.innerHTML = `<div class="loading">正在加载 ${esc(board.name)} 走势…</div>`;
+      try {
+        const kl = await fetchBoardKline(boardCode, 101, 250);
+        const ann = calcHs300Annual(kl);
+        det.innerHTML = `<div class="metrics" style="margin-bottom:10px">
+          ${metricCard("行业指数", board.name, board.code)}
+          ${metricCard("最新点位", board.price != null ? board.price.toFixed(2) : "—", "")}
+          ${metricCard("今日涨跌", chgText(board.changePct), "")}
+          ${metricCard("总市值", fmtMoney(board.totalMcap), "")}
+          ${ann.usable ? metricCard("近 " + ann.rows.length + " 年年化", (ann.cagr * 100).toFixed(1) + "%", ann.fromYear + "–" + ann.toYear) : ""}
+        </div>
+        <div class="chart-box short"><canvas class="chart" id="sectorHistChart"></canvas></div>
+        ${ann.usable ? `<table class="tbl" style="margin-top:10px"><tr><th>年份</th><th>年末点位</th><th>年度回报</th></tr>` +
+          ann.rows.map((r) => `<tr><td>${r.year}</td><td class="num">${r.close.toFixed(2)}</td><td class="num ${chgClass(r.ret * 100)}">${(r.ret >= 0 ? "+" : "") + (r.ret * 100).toFixed(1)}%</td></tr>`).join("") + `</table>
+          <p class="muted" style="margin-top:8px">上涨 ${ann.upYears} 年 / 下跌 ${ann.downYears} 年 · 平均年度回报 ${(ann.avgRet * 100).toFixed(1)}% · ${esc(ann.note)}</p>` : `<p class="muted">年度回报暂不可用：${esc(ann.reason)}</p>`}`;
+        drawKline(document.getElementById("sectorHistChart"), kl, { limit: 250 });
+      } catch (e2) {
+        det.innerHTML = `<p class="muted">行业指数走势暂不可用（${esc(e2.message || e2)}）。东财板块 K 线偶发 rc=102 限流，点“加载走势”重试。</p>`;
+      }
+    };
+    document.getElementById("sectorHistBtn").addEventListener("click", () => loadBoard(document.getElementById("sectorBoardSel").value));
+    document.getElementById("sectorBoardSel").addEventListener("change", (e) => loadBoard(e.target.value));
+    sectorHistLoadedFor = code;
+    await loadBoard(def.code);
+  } catch (e) {
+    el.innerHTML = `<p class="muted">行业历史暂不可用（${esc(e.message || e)}）。<a href="#" id="sectorHistRetry">重试</a></p>`;
+    document.getElementById("sectorHistRetry").addEventListener("click", (ev) => { ev.preventDefault(); sectorHistLoadedFor = null; renderSectorHist(code); });
+  }
+}
+
+// ---------- 热力图 ----------
+function heatColor(pct) {
+  if (pct == null || !isFinite(pct)) return { bg: "#f1f5f9", fg: "#64748b" };
+  const a = Math.min(0.85, 0.18 + Math.abs(pct) / 12);
+  if (pct > 0) return { bg: "rgba(229,72,77," + a.toFixed(2) + ")", fg: a > 0.55 ? "#fff" : "#991b1b" };
+  if (pct < 0) return { bg: "rgba(26,158,84," + a.toFixed(2) + ")", fg: a > 0.55 ? "#fff" : "#14532d" };
+  return { bg: "#f1f5f9", fg: "#64748b" };
+}
+async function renderHeatmap(kind) {
+  const el = document.getElementById("heatmapBody");
+  el.innerHTML = `<div class="loading">正在加载${kind === "concept" ? "概念" : "行业"}板块…</div>`;
+  try {
+    const boards = await fetchBoards(kind, 600);
+    if (!boards.length) throw new Error("板块列表无数据");
+    const sorted = [...boards].sort((a, b) => (b.changePct || 0) - (a.changePct || 0));
+    const top = sorted.slice(0, 10), bottom = sorted.slice(-10).reverse();
+    let html = `<p class="muted" style="margin-bottom:8px">共 ${boards.length} 个${kind === "concept" ? "概念" : "行业"}板块 · 点击色块查看该板块 1 年走势与年度回报 · 颜色越深涨跌幅越大。行业板块含申万二/三级子行业（如焦炭Ⅱ/焦炭Ⅲ），同价并列属正常。</p>`;
+    html += `<p style="margin-bottom:10px">领涨：${top.map((b) => esc(b.name) + " +" + (b.changePct || 0).toFixed(2) + "%").join(" · ")}<br>领跌：${bottom.map((b) => esc(b.name) + " " + (b.changePct || 0).toFixed(2) + "%").join(" · ")}</p>`;
+    html += `<div class="heatmap">` + sorted.map((b) => {
+      const c = heatColor(b.changePct);
+      return `<div class="hm-cell" data-board="${esc(b.code)}" data-name="${esc(b.name)}" style="background:${c.bg};color:${c.fg}" title="${esc(b.name)} ${b.changePct != null ? (b.changePct > 0 ? "+" : "") + b.changePct.toFixed(2) + "%" : ""}"><span class="hm-name">${esc(b.name)}</span><span class="hm-pct">${b.changePct != null ? (b.changePct > 0 ? "+" : "") + b.changePct.toFixed(2) + "%" : "—"}</span></div>`;
+    }).join("") + `</div><div id="heatmapDetail" style="margin-top:14px"></div>`;
+    el.innerHTML = html;
+    el.querySelectorAll(".hm-cell").forEach((cell) => {
+      cell.addEventListener("click", () => loadBoardDetail(cell.dataset.board, cell.dataset.name, kind));
+    });
+  } catch (e) {
+    el.innerHTML = `<p class="muted">热力图暂不可用（${esc(e.message || e)}）。<a href="#" id="heatmapRetry">重试</a></p>`;
+    document.getElementById("heatmapRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHeatmap(kind); });
+  }
+}
+async function loadBoardDetail(boardCode, boardName, kind) {
+  const det = document.getElementById("heatmapDetail");
+  if (!det) return;
+  det.innerHTML = `<div class="loading">正在加载 ${esc(boardName)} 走势…</div>`;
+  try {
+    const kl = await fetchBoardKline(boardCode, 101, 250);
+    const ann = calcHs300Annual(kl);
+    det.innerHTML = `<h3>${esc(boardName)} · 近 1 年走势</h3>
+      <div class="chart-box short"><canvas class="chart" id="heatmapChart"></canvas></div>
+      ${ann.usable ? `<p class="muted" style="margin-top:8px">近 ${ann.rows.length} 年：上涨 ${ann.upYears} 年 / 下跌 ${ann.downYears} 年 · 平均年度回报 ${(ann.avgRet * 100).toFixed(1)}% · 年化 ${(ann.cagr * 100).toFixed(1)}%</p>` : ""}`;
+    drawKline(document.getElementById("heatmapChart"), kl, { limit: 250 });
+    document.getElementById("heatmapChart").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    det.innerHTML = `<p class="muted">${esc(boardName)} 走势暂不可用（${esc(e.message || e)}）。东财板块 K 线偶发 rc=102 限流，稍后重试。</p>`;
+  }
+}
+
+// ---------- 低估雷达 ----------
+async function renderRadar() {
+  const el = document.getElementById("radarBody");
+  el.innerHTML = `<div class="loading">正在全市场扫描低估股…</div>`;
+  try {
+    const all = await fetchMarketScan(500);
+    const cands = all.filter((s) =>
+      s.pe != null && s.pe >= 3 && s.pe <= 15 &&
+      s.pb != null && s.pb >= 0.5 && s.pb <= 2.5 &&
+      s.totalMcap != null && s.totalMcap >= 5e9 &&
+      s.name && !/退|ST|PT/.test(s.name)
+    ).slice(0, 30);
+    if (!cands.length) throw new Error("按规则筛出 0 只（PE（静态）3–15、PB 0.5–2.5、市值>50 亿）");
+    const quotes = await fetchTxQuotes(cands.map((s) => s.code));
+    const scored = cands.map((s) => {
+      const q = quotes[s.code] || {};
+      const roe = q.roe != null ? q.roe : null; // 腾讯 qt 字段 65 = ROE（%）
+      const peS = Math.max(0, Math.min(100, (15 - s.pe) / 12 * 100));
+      const pbS = Math.max(0, Math.min(100, (2.5 - s.pb) / 2 * 100));
+      const roeS = roe != null ? Math.max(0, Math.min(100, roe / 20 * 100)) : 50;
+      const score = Math.round(peS * 0.4 + pbS * 0.3 + roeS * 0.3);
+      return { ...s, roe, score };
+    }).sort((a, b) => b.score - a.score);
+    let html = `<p class="muted" style="margin-bottom:10px">规则：PE（静态，东财 clist f9 口径）3–15 倍 · PB 0.5–2.5 倍 · 总市值 &gt; 50 亿 · 剔除退市/ST 股 · 评分 = PE 越低越好（40%）+ PB 越低越好（30%）+ ROE 越高越好（30%，腾讯行情 ROE）。扫描范围：东财全市场按 PE 升序取前 500 只（全市场共 5563 只，PE 排序靠后的不在本次扫描内）。</p>`;
+    html += `<table class="tbl"><tr><th>#</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌</th><th>PE（静态）</th><th>PB</th><th>总市值</th><th>ROE</th><th>雷达评分</th></tr>`;
+    scored.forEach((s, i) => {
+      html += `<tr><td>${i + 1}</td><td><a href="#" data-radar-code="${esc(s.code)}">${esc(s.code)}</a></td><td style="text-align:left">${esc(s.name)}</td><td class="num">${s.price != null ? s.price.toFixed(2) : "—"}</td><td class="num ${chgClass(s.changePct)}">${chgText(s.changePct)}</td><td class="num">${s.pe.toFixed(2)}</td><td class="num">${s.pb.toFixed(2)}</td><td class="num">${fmtMoney(s.totalMcap)}</td><td class="num">${s.roe != null ? s.roe.toFixed(1) + "%" : "—"}</td><td class="num"><b>${s.score}</b></td></tr>`;
+    });
+    html += `</table><p class="muted" style="margin-top:8px">点击代码可直接分析该股。雷达评分是筛选排序分，不是买入建议；低 PE/PB 可能是价值陷阱，请结合财报与分红页交叉验证。</p>`;
+    el.innerHTML = html;
+    el.querySelectorAll("[data-radar-code]").forEach((a) => a.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "overview"));
+      document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-overview"));
+      document.getElementById("toolArea").style.display = "none";
+      document.getElementById("detailArea").style.display = "block";
+      document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
+      loadStock(a.dataset.radarCode);
+    }));
+  } catch (e) {
+    el.innerHTML = `<p class="muted">低估雷达暂不可用（${esc(e.message || e)}）。<a href="#" id="radarRetry">重试</a></p>`;
+    document.getElementById("radarRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderRadar(); });
+  }
+}
+
+// ---------- 比较器 ----------
+const compareCache = {};
+async function renderCompare() {
+  const el = document.getElementById("compareBody");
+  const picked = watchlist.slice(0, 2).map((s) => s.code);
+  el.innerHTML = `<p class="muted" style="margin-bottom:10px">勾选 2–4 只自选股对比（默认前 2 只）。指标全部实时拉取。</p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px">${watchlist.map((s) =>
+      `<label style="font-size:14px"><input type="checkbox" class="cmp-check" value="${esc(s.code)}" ${picked.includes(s.code) ? "checked" : ""}> ${esc(s.name)} ${esc(s.code)}</label>`).join("")}</div>
+    <button class="primary" id="compareBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">开始对比</button>
+    <div id="compareResult" style="margin-top:12px"></div>`;
+  document.getElementById("compareBtn").addEventListener("click", async () => {
+    const codes = [...el.querySelectorAll(".cmp-check:checked")].map((c) => c.value);
+    const res = document.getElementById("compareResult");
+    if (codes.length < 2 || codes.length > 4) { res.innerHTML = `<p class="muted">请勾选 2–4 只股票。</p>`; return; }
+    res.innerHTML = `<div class="loading">正在拉取 ${codes.length} 只股票数据…</div>`;
+    const items = [];
+    for (const code of codes) {
+      try {
+        if (!compareCache[code]) {
+          const data = await fetchStockAll(code);
+          const m = calcMetrics(data);
+          const sc = scoreStock(m, data.klineD);
+          compareCache[code] = { data, m, sc };
+        }
+        items.push({ code, ...compareCache[code] });
+      } catch (e) {
+        items.push({ code, error: String(e.message || e) });
+      }
+    }
+    const rows = [
+      ["名称", (it) => (it.data && it.data.quote && it.data.quote.name) || (it.m && it.m.industry) || it.code],
+      ["现价", (it) => it.m && it.m.price != null ? it.m.price.toFixed(2) : "—"],
+      ["涨跌幅", (it) => it.m ? chgText(it.m.changePct) : "—"],
+      ["PE-TTM", (it) => it.m && it.m.peTtm != null ? it.m.peTtm.toFixed(2) : "—"],
+      ["PB", (it) => it.m && it.m.pb != null ? it.m.pb.toFixed(2) : "—"],
+      ["股息率", (it) => it.m && it.m.divYield != null ? it.m.divYield.toFixed(2) + "%" : "—"],
+      ["ROE（TTM）", (it) => it.m ? pct1(it.m.roe) : "—"],
+      ["净利率（TTM）", (it) => it.m ? pct1(it.m.netMargin) : "—"],
+      ["ROIC（TTM）", (it) => { const e2 = it.data ? calcExtended(it.data, it.m) : null; return e2 ? pct1(e2.profitability.roic) : "—"; }],
+      ["ROCE（TTM）", (it) => { const e2 = it.data ? calcExtended(it.data, it.m) : null; return e2 ? pct1(e2.profitability.roce) : "—"; }],
+      ["营收 TTM 同比", (it) => it.m ? pct1(it.m.revGrowth) : "—"],
+      ["利润 TTM 同比", (it) => it.m ? pct1(it.m.profitGrowth) : "—"],
+      ["资产负债率", (it) => it.m ? pct1(it.m.debtRatio) : "—"],
+      ["自由现金流（TTM）", (it) => it.m ? fmtMoney(it.m.ttmFcf) : "—"],
+      ["总市值", (it) => it.m ? fmtMoney(it.m.totalMcap) : "—"],
+      ["综合评分", (it) => it.sc ? it.sc.total + " / " + it.sc.totalMax + "（" + it.sc.grade + "）" : "—"],
+    ];
+    let html = `<table class="tbl"><tr><th>指标</th>` + items.map((it) => `<th>${esc(it.code)}</th>`).join("") + `</tr>`;
+    for (const [label, fn] of rows) {
+      html += `<tr><td>${esc(label)}</td>` + items.map((it) => `<td class="num">${it.error ? "—" : esc(String(fn(it)))}</td>`).join("") + `</tr>`;
+    }
+    html += `</table><p class="muted" style="margin-top:8px">ETF/指数类无财报数据，盈利/负债类指标显示“—”。对比结果按本次拉取缓存，切换股票后重新拉取。</p>`;
+    res.innerHTML = html;
+  });
+}
+
+// ---------- 沪深300 ----------
+async function renderHs300() {
+  const retEl = document.getElementById("hs300RetBody");
+  const tgtEl = document.getElementById("hs300TargetBody");
+  retEl.innerHTML = `<div class="loading">正在加载沪深300 K 线…</div>`;
+  tgtEl.innerHTML = `<div class="loading">正在加载沪深300成分股…</div>`;
+  // 年度回报
+  try {
+    const kl = await fetchHs300LongKline();
+    const ann = calcHs300Annual(kl);
+    if (!ann.usable) throw new Error(ann.reason);
+    retEl.innerHTML = `<div class="metrics" style="margin-bottom:10px">
+        ${metricCard("覆盖年份", ann.fromYear + "–" + ann.toYear + "（" + ann.rows.length + " 年）", ann.note)}
+        ${metricCard("平均年度回报", (ann.avgRet * 100).toFixed(1) + "%", "")}
+        ${metricCard("年化回报（CAGR）", (ann.cagr * 100).toFixed(1) + "%", "首年末收盘 → 末年末收盘")}
+        ${metricCard("上涨 / 下跌年数", ann.upYears + " / " + ann.downYears + " 年", "")}
+      </div>
+      <table class="tbl"><tr><th>年份</th><th>年末收盘</th><th>年度回报</th></tr>` +
+      ann.rows.map((r) => `<tr><td>${r.year}</td><td class="num">${r.close.toFixed(2)}</td><td class="num ${chgClass(r.ret * 100)}">${(r.ret >= 0 ? "+" : "") + (r.ret * 100).toFixed(1)}%</td></tr>`).join("") +
+      `</table><p class="muted" style="margin-top:8px">算法：每年最后一个交易日收盘价之比。仅计价格回报，不含分红（全收益回报会略高）。</p>`;
+  } catch (e) {
+    retEl.innerHTML = `<p class="muted">沪深300年度回报暂不可用（${esc(e.message || e)}）。<a href="#" id="hs300RetRetry">重试</a></p>`;
+    document.getElementById("hs300RetRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHs300(); });
+  }
+  // 目标价格：成分股聚合（datacenter 成分表 + 腾讯 qt 分批补 PE/市值）
+  // 注意：000300 不能走 fetchEmQuote——通用 secid 映射会把 000300 误判为深市（0.000300，rc=100）；
+  // 指数行情直接用腾讯 q=sh000300（[3]=现价、[39]=指数 PE-TTM，2026-11-09 实测 13.55）。
+  try {
+    const iq = await fetchTxQuotes([API.HS300_CODE]);
+    const idxQ = iq[API.HS300_CODE] || {};
+    const price = idxQ.price || null;
+    const indexPeTx = idxQ.peTtm || null;
+    if (price == null) throw new Error("沪深300现价未取到（腾讯 qt 返回空）");
+    const cons = await fetchHs300Constituents();
+    if (!cons.length) throw new Error("成分股列表无数据（datacenter RPT_INDEX_CONSTITUENT 返回空）");
+    const quotes = await fetchTxQuotesChunked(cons.map((c) => c.code));
+    const withVal = cons.map((c) => {
+      const q = quotes[c.code] || {};
+      return { ...c, pe: q.peTtm, totalMcap: q.totalMcapYi != null ? q.totalMcapYi * 1e8 : null };
+    }).filter((c) => c.pe != null && c.pe > 0 && c.totalMcap != null && c.totalMcap > 0);
+    if (!withVal.length) throw new Error("成分股 PE/市值未取到（腾讯 qt 返回空）");
+    const sumMcap = withVal.reduce((a, c) => a + c.totalMcap, 0);
+    const sumEarn = withVal.reduce((a, c) => a + c.totalMcap / c.pe, 0);
+    const peWeighted = sumEarn > 0 ? sumMcap / sumEarn : null;
+    const top50 = [...withVal].sort((a, b) => b.totalMcap - a.totalMcap).slice(0, 50);
+    // 前 50 大市值成分股归母利润同比聚合（最新报告期累计 vs 去年同期）
+    let growth = null, growthNote = "";
+    try {
+      const codes = top50.map((c) => c.code);
+      const inList = codes.map((c) => '"' + c + '"').join(",");
+      const rows = await emDatacenter(
+        "RPT_LICO_FN_CPD",
+        "SECURITY_CODE,REPORTDATE,PARENT_NETPROFIT",
+        "(SECURITY_CODE in (" + inList + "))",
+        { pageSize: 200, sortColumns: "REPORTDATE", sortTypes: "-1" }
+      );
+      const byDate = {};
+      for (const r of rows) {
+        const d = String(r.REPORTDATE || "").slice(0, 10);
+        if (!byDate[d]) byDate[d] = {};
+        byDate[d][r.SECURITY_CODE] = num(r.PARENT_NETPROFIT);
+      }
+      const dates = Object.keys(byDate).sort().reverse();
+      const d1 = dates[0];
+      const d0 = dates.find((d) => d.slice(5) === (d1 || "").slice(5) && Number(d.slice(0, 4)) === Number((d1 || "").slice(0, 4)) - 1);
+      if (d1 && d0) {
+        const common = Object.keys(byDate[d1]).filter((c) => byDate[d0][c] != null && byDate[d1][c] != null);
+        const s1 = common.reduce((a, c) => a + byDate[d1][c], 0);
+        const s0 = common.reduce((a, c) => a + byDate[d0][c], 0);
+        if (s0 && common.length) {
+          growth = s1 / s0 - 1;
+          growthNote = "前 50 大市值成分股中 " + common.length + " 只纳入（" + d1 + " 累计归母利润 vs " + d0 + " 同期）";
+        }
+      }
+      if (growth == null) growthNote = "未取到可比的两期利润数据（datacenter 返回为空或报告期不匹配）";
+    } catch (e2) {
+      growthNote = "利润聚合失败：" + (e2.message || e2);
+    }
+    const renderTargetCalc = (targetPe) => {
+      const res = calcHs300Target(price, peWeighted, growth, targetPe);
+      if (!res.usable) return `<p class="muted">目标价算不出：${esc(res.reason)}。</p>`;
+      return `<div class="dcf-result">
+        <div class="small">沪深300 目标点位（盈利增长 × 估值调整）</div>
+        <div class="big ${res.target >= price ? "up" : "down"}">${res.target.toFixed(2)} 点</div>
+        <div class="vs">当前 ${price != null ? price.toFixed(2) + " 点" : "—"} · ${res.upside >= 0 ? "高于现价 " + (res.upside * 100).toFixed(1) + "%" : "低于现价 " + Math.abs(res.upside * 100).toFixed(1) + "%"}</div>
+        <div class="small" style="margin-top:6px">${esc(res.formula)}</div>
+      </div>`;
+    };
+    tgtEl.innerHTML = `<div class="metrics" style="margin-bottom:10px">
+        ${metricCard("当前点位", price != null ? price.toFixed(2) : "—", "腾讯实时行情")}
+        ${metricCard("成分股加权 PE", peWeighted != null ? peWeighted.toFixed(2) + " 倍" : "—", "市值加权调和口径，" + withVal.length + " 只纳入")}
+        ${metricCard("腾讯指数 PE（核对）", indexPeTx != null ? indexPeTx.toFixed(2) + " 倍" : "—", "腾讯 q=sh000300 [39] PE-TTM")}
+        ${metricCard("盈利增速 g", growth != null ? (growth >= 0 ? "+" : "") + (growth * 100).toFixed(1) + "%" : "—", growthNote)}
+      </div>
+      <div class="dcf-grid">
+        <div class="dcf-field"><label>目标 PE（倍，默认=当前加权 PE）</label><input id="hs300TargetPe" type="number" step="0.5" min="1" max="60" value="${peWeighted != null ? peWeighted.toFixed(1) : ""}"></div>
+      </div>
+      <button class="primary" id="hs300CalcBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">重新计算</button>
+      <div id="hs300TargetResult" style="margin-top:12px">${renderTargetCalc(peWeighted)}</div>
+      <p class="muted" style="margin-top:10px">公式：目标点位 = 当前点位 × (1 + g) × (目标 PE ÷ 当前加权 PE)。g 为前 50 大市值成分股归母净利润同比聚合（累计口径）；加权 PE 为成分股市值加权调和 PE-TTM（腾讯 qt，剔除 PE≤0）。成分股名单来自东财 datacenter RPT_INDEX_CONSTITUENT（300 只）。腾讯指数 PE 是另一口径的指数 PE，可作交叉核对，两者口径不同、数值会有差异；目标 PE 默认等于当前加权 PE，即“估值不变、只赚盈利增长的钱”情景，改目标 PE 可模拟估值修复/压缩。沪深300 PB 两个免费源都给不出，本页不列 PB。</p>`;
+    document.getElementById("hs300CalcBtn").addEventListener("click", () => {
+      const tp = parseFloat(document.getElementById("hs300TargetPe").value);
+      document.getElementById("hs300TargetResult").innerHTML = renderTargetCalc(tp);
+    });
+  } catch (e) {
+    tgtEl.innerHTML = `<p class="muted">沪深300目标价格暂不可用（${esc(e.message || e)}）。成分股/行情接口偶发限流，可点“重试”。目标点位公式：当前点位 × (1+g) × (目标 PE ÷ 当前加权 PE)。<a href="#" id="hs300TgtRetry">重试</a></p>`;
+    document.getElementById("hs300TgtRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHs300(); });
+  }
+}
+
+// ---------- 我的图形 ----------
+const LS_CHARTS = "af_mycharts";
+function loadMyCharts() {
+  try {
+    const raw = localStorage.getItem(LS_CHARTS);
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
+  } catch (e) { /* 忽略 */ }
+  return [];
+}
+function saveMyCharts(list) { localStorage.setItem(LS_CHARTS, JSON.stringify(list)); }
+function kltLabel(klt) { return klt === 102 ? "周K" : klt === 103 ? "月K" : "日K"; }
+function saveCurrentChart() {
+  if (!currentData || !currentCode) return;
+  const btn = document.getElementById("saveChartBtn");
+  const name = (currentData.quote && currentData.quote.name) || (currentData.tx && currentData.tx.name) || currentCode;
+  const today = new Date().toLocaleDateString("zh-CN");
+  let label = "";
+  try { label = window.prompt("给这个图形起个名字：", name + " " + currentCode + " " + kltLabel(currentKlt) + " " + today) || ""; } catch (e) { label = ""; }
+  if (!label) return;
+  const list = loadMyCharts();
+  list.unshift({
+    id: "c" + Date.now(),
+    name: label, code: currentCode, klt: currentKlt,
+    date: today,
+    price: currentMetrics && currentMetrics.price != null ? currentMetrics.price : null,
+    changePct: currentMetrics ? currentMetrics.changePct : null,
+  });
+  saveMyCharts(list);
+  if (btn) { const old = btn.textContent; btn.textContent = "✓ 已保存"; setTimeout(() => { btn.textContent = old; }, 1500); }
+  if (toolLoaded.mycharts) renderMycharts();
+}
+function renderMycharts() {
+  const el = document.getElementById("mychartsBody");
+  const list = loadMyCharts();
+  if (!list.length) {
+    el.innerHTML = `<p class="muted">还没有保存的图形。在任意股票的“技术”页点“💾 保存当前图形到‘我的图形’”，可把当前 K 线视图（代码 + 日/周/月周期 + 保存时价格）存下来，之后一点即达。</p>`;
+    return;
+  }
+  el.innerHTML = `<table class="tbl"><tr><th>名称</th><th>代码</th><th>周期</th><th>保存时价格</th><th>保存日期</th><th>操作</th></tr>` +
+    list.map((c) => `<tr><td style="text-align:left">${esc(c.name)}</td><td>${esc(c.code)}</td><td>${esc(kltLabel(c.klt))}</td><td class="num">${c.price != null ? c.price.toFixed(2) : "—"}${c.changePct != null ? "（" + chgText(c.changePct) + "）" : ""}</td><td>${esc(c.date || "")}</td>
+      <td><a href="#" data-open-chart="${esc(c.id)}">打开</a> · <a href="#" data-del-chart="${esc(c.id)}">删除</a></td></tr>`).join("") + `</table>`;
+  el.querySelectorAll("[data-open-chart]").forEach((a) => a.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    const c = loadMyCharts().find((x) => x.id === a.dataset.openChart);
+    if (!c) return;
+    currentKlt = c.klt || 101;
+    document.querySelectorAll("#klineSeg button").forEach((b) => b.classList.toggle("active", parseInt(b.dataset.klt, 10) === currentKlt));
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "tech"));
+    document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-tech"));
+    document.getElementById("toolArea").style.display = "none";
+    document.getElementById("detailArea").style.display = "block";
+    document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
+    loadStock(c.code);
+  }));
+  el.querySelectorAll("[data-del-chart]").forEach((a) => a.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    saveMyCharts(loadMyCharts().filter((x) => x.id !== a.dataset.delChart));
+    renderMycharts();
+  }));
 }
 
 // ---------- 时钟 ----------
