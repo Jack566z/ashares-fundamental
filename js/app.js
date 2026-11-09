@@ -226,7 +226,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
-const TOOL_LOADERS = { heatmap: () => renderHeatmap("industry"), radar: renderRadar, compare: renderCompare, hs300: renderHs300, mycharts: renderMycharts };
+const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300: renderHs300, mycharts: renderMycharts };
 const toolLoaded = {};
 document.getElementById("toolTabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tool]");
@@ -239,11 +239,23 @@ document.getElementById("toolTabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tool-pane").forEach((p) => { p.style.display = p.id === "tool-" + btn.dataset.tool ? "block" : "none"; });
   if (!toolLoaded[btn.dataset.tool]) { toolLoaded[btn.dataset.tool] = true; TOOL_LOADERS[btn.dataset.tool](); }
 });
-document.getElementById("heatmapSeg").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-hm]");
+document.getElementById("hmIndexSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-hm-idx]");
   if (!btn) return;
-  document.querySelectorAll("#heatmapSeg button").forEach((b) => b.classList.toggle("active", b === btn));
-  renderHeatmap(btn.dataset.hm);
+  document.querySelectorAll("#hmIndexSeg button").forEach((b) => b.classList.toggle("active", b === btn));
+  hmIndex = btn.dataset.hmIdx;
+  renderHeatmap();
+});
+document.getElementById("hmPeriodSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-hm-per]");
+  if (!btn) return;
+  document.querySelectorAll("#hmPeriodSeg button").forEach((b) => b.classList.toggle("active", b === btn));
+  hmPeriod = btn.dataset.hmPer;
+  if (hmCache[hmIndex]) {
+    const idx = HM_INDEXES.find((i) => i.code === hmIndex) || HM_INDEXES[0];
+    const per = HM_PERIODS.find((p) => p.key === hmPeriod) || HM_PERIODS[0];
+    drawHeatmapTreemap(hmCache[hmIndex], idx, per);
+  } else renderHeatmap();
 });
 document.getElementById("saveChartBtn").addEventListener("click", saveCurrentChart);
 document.getElementById("klineSeg").addEventListener("click", (e) => {
@@ -1314,44 +1326,177 @@ function heatColor(pct) {
   if (pct < 0) return { bg: "rgba(26,158,84," + a.toFixed(2) + ")", fg: a > 0.55 ? "#fff" : "#14532d" };
   return { bg: "#f1f5f9", fg: "#64748b" };
 }
-async function renderHeatmap(kind) {
+// ---------- 切到个股仪表盘（唯一入口，复用 loadStock）----------
+// 热力图方框、低估雷达代码链接都走这里：切到概况标签页并加载该股。
+function switchToStock(code) {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "overview"));
+  document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-overview"));
+  document.getElementById("toolArea").style.display = "none";
+  document.getElementById("detailArea").style.display = "block";
+  document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
+  loadStock(code);
+}
+
+// ---------- 热力图（指数成分股树图）----------
+// 颜色：红色上涨 / 绿色下跌（与本站一致，复用 heatColor；不是截图的绿涨红跌）。
+// 方框面积 = 总市值（f20）；分组 = 申万二级行业（f100）；点击方框进该股仪表盘。
+const HM_INDEXES = [
+  { code: "000300", name: "沪深300" },
+  { code: "000001", name: "上证指数" },
+  { code: "399001", name: "深证成指" },
+  { code: "399006", name: "创业板指" },
+  { code: "000688", name: "科创50" },
+  { code: "000905", name: "中证500" },
+];
+// 周期字段均经 2026-11-09 茅台实测（见 api.js fetchEmQuotesBatch 注释）：
+// 天=f3 当日、周=f109 5日、月=f110 20日、年=f160 年初至今。
+const HM_PERIODS = [
+  { key: "day", name: "天", field: "changePct", note: "当日涨跌幅" },
+  { key: "week", name: "周", field: "chg5d", note: "近 5 日涨跌幅" },
+  { key: "month", name: "月", field: "chg20d", note: "近 20 日涨跌幅" },
+  { key: "year", name: "年", field: "chgYtd", note: "年初至今涨跌幅" },
+];
+const HM_DISPLAY_CAP = 400; // 单个指数最多显示只数（上证指数成分 2255 只，只取总市值前 400）
+let hmIndex = "000300";
+let hmPeriod = "day";
+const hmCache = {}; // indexCode -> { stocks, total, capped, fetchedAt, maxUpdatedAt }
+let hmResizeTimer = null;
+let hmResizeBound = false;
+function bindHmResizeOnce() {
+  if (hmResizeBound || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  hmResizeBound = true;
+  window.addEventListener("resize", () => {
+    clearTimeout(hmResizeTimer);
+    hmResizeTimer = setTimeout(() => {
+      if (hmCache[hmIndex] && document.getElementById("toolArea").style.display === "block") {
+        const idx = HM_INDEXES.find((i) => i.code === hmIndex) || HM_INDEXES[0];
+        const per = HM_PERIODS.find((p) => p.key === hmPeriod) || HM_PERIODS[0];
+        drawHeatmapTreemap(hmCache[hmIndex], idx, per);
+      }
+    }, 300);
+  });
+}
+// Squarified 树图布局（纯 JS，不引库）：输入按 value 降序，输出每项 {item, x, y, w, h}。
+// 先把 value 归一化到容器面积，再按经典 squarify 算法沿较长边逐行排布。
+function squarifyLayout(items, x, y, w, h) {
+  const rects = [];
+  const total = items.reduce((s, it) => s + (it.value > 0 ? it.value : 0), 0);
+  if (!items.length || total <= 0 || w <= 0 || h <= 0) return rects;
+  const k = (w * h) / total;
+  const nodes = items.filter((it) => it.value > 0).map((it) => ({ item: it, v: it.value * k }));
+  let cx = x, cy = y, cw = w, ch = h, row = [], rowSum = 0;
+  const worst = (r, sum, side) => {
+    let mx = -Infinity, mn = Infinity;
+    for (const n of r) { if (n.v > mx) mx = n.v; if (n.v < mn) mn = n.v; }
+    return Math.max((side * side * mx) / (sum * sum), (sum * sum) / (side * side * mn));
+  };
+  const flushRow = () => {
+    if (!row.length) return;
+    if (cw >= ch) {
+      const rh = rowSum / cw;
+      let rx = cx;
+      for (const n of row) {
+        const rw = n.v / rh;
+        rects.push({ item: n.item, x: rx, y: cy, w: rw, h: rh });
+        rx += rw;
+      }
+      cy += rh; ch -= rh;
+    } else {
+      const rw = rowSum / ch;
+      let ry = cy;
+      for (const n of row) {
+        const rh2 = n.v / rw;
+        rects.push({ item: n.item, x: cx, y: ry, w: rw, h: rh2 });
+        ry += rh2;
+      }
+      cx += rw; cw -= rw;
+    }
+    row = []; rowSum = 0;
+  };
+  for (const n of nodes) {
+    const side = Math.max(cw, ch);
+    if (!row.length) { row = [n]; rowSum = n.v; continue; }
+    const cur = worst(row, rowSum, side);
+    const nxt = worst([...row, n], rowSum + n.v, side);
+    if (nxt <= cur) { row.push(n); rowSum += n.v; }
+    else { flushRow(); row = [n]; rowSum = n.v; }
+  }
+  flushRow();
+  return rects;
+}
+async function renderHeatmap() {
+  bindHmResizeOnce();
   const el = document.getElementById("heatmapBody");
-  el.innerHTML = `<div class="loading">正在加载${kind === "concept" ? "概念" : "行业"}板块…</div>`;
+  const idx = HM_INDEXES.find((i) => i.code === hmIndex) || HM_INDEXES[0];
+  const per = HM_PERIODS.find((p) => p.key === hmPeriod) || HM_PERIODS[0];
+  el.innerHTML = `<div class="loading">正在加载${esc(idx.name)}成分股行情…</div>`;
   try {
-    const boards = await fetchBoards(kind, 600);
-    if (!boards.length) throw new Error("板块列表无数据");
-    const sorted = [...boards].sort((a, b) => (b.changePct || 0) - (a.changePct || 0));
-    const top = sorted.slice(0, 10), bottom = sorted.slice(-10).reverse();
-    let html = `<p class="muted" style="margin-bottom:8px">共 ${boards.length} 个${kind === "concept" ? "概念" : "行业"}板块 · 点击色块查看该板块 1 年走势与年度回报 · 颜色越深涨跌幅越大。行业板块含申万二/三级子行业（如焦炭Ⅱ/焦炭Ⅲ），同价并列属正常。</p>`;
-    html += `<p style="margin-bottom:10px">领涨：${top.map((b) => esc(b.name) + " +" + (b.changePct || 0).toFixed(2) + "%").join(" · ")}<br>领跌：${bottom.map((b) => esc(b.name) + " " + (b.changePct || 0).toFixed(2) + "%").join(" · ")}</p>`;
-    html += `<div class="heatmap">` + sorted.map((b) => {
-      const c = heatColor(b.changePct);
-      return `<div class="hm-cell" data-board="${esc(b.code)}" data-name="${esc(b.name)}" style="background:${c.bg};color:${c.fg}" title="${esc(b.name)} ${b.changePct != null ? (b.changePct > 0 ? "+" : "") + b.changePct.toFixed(2) + "%" : ""}"><span class="hm-name">${esc(b.name)}</span><span class="hm-pct">${b.changePct != null ? (b.changePct > 0 ? "+" : "") + b.changePct.toFixed(2) + "%" : "—"}</span></div>`;
-    }).join("") + `</div><div id="heatmapDetail" style="margin-top:14px"></div>`;
-    el.innerHTML = html;
-    el.querySelectorAll(".hm-cell").forEach((cell) => {
-      cell.addEventListener("click", () => loadBoardDetail(cell.dataset.board, cell.dataset.name, kind));
-    });
+    let data = hmCache[hmIndex];
+    if (!data) {
+      const cons = await fetchIndexConstituents(hmIndex);
+      if (!cons.length) throw new Error(idx.name + "成分拉取为空");
+      const quotes = await fetchEmQuotesChunked(cons.map((c) => c.code));
+      let stocks = cons.map((c) => {
+        const q = quotes[c.code] || {};
+        return { code: c.code, name: q.name || c.name, price: q.price, changePct: q.changePct, chg5d: q.chg5d, chg20d: q.chg20d, chg60d: q.chg60d, chgYtd: q.chgYtd, totalMcap: q.totalMcap || 0, industry: q.industry || "未分类", updatedAt: q.updatedAt };
+      }).filter((s) => s.totalMcap > 0);
+      stocks.sort((a, b) => b.totalMcap - a.totalMcap);
+      const capped = stocks.length > HM_DISPLAY_CAP;
+      if (capped) stocks = stocks.slice(0, HM_DISPLAY_CAP);
+      data = { stocks, total: cons.length, capped, fetchedAt: new Date(), maxUpdatedAt: Math.max(0, ...stocks.map((s) => s.updatedAt || 0)) };
+      hmCache[hmIndex] = data;
+    }
+    drawHeatmapTreemap(data, idx, per);
   } catch (e) {
     el.innerHTML = `<p class="muted">热力图暂不可用（${esc(e.message || e)}）。<a href="#" id="heatmapRetry">重试</a></p>`;
-    document.getElementById("heatmapRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHeatmap(kind); });
+    document.getElementById("heatmapRetry").addEventListener("click", (ev) => { ev.preventDefault(); delete hmCache[hmIndex]; renderHeatmap(); });
   }
 }
-async function loadBoardDetail(boardCode, boardName, kind) {
-  const det = document.getElementById("heatmapDetail");
-  if (!det) return;
-  det.innerHTML = `<div class="loading">正在加载 ${esc(boardName)} 走势…</div>`;
-  try {
-    const kl = await fetchBoardKline(boardCode, 101, 250);
-    const ann = calcHs300Annual(kl);
-    det.innerHTML = `<h3>${esc(boardName)} · 近 1 年走势</h3>
-      <div class="chart-box short"><canvas class="chart" id="heatmapChart"></canvas></div>
-      ${ann.usable ? `<p class="muted" style="margin-top:8px">近 ${ann.rows.length} 年：上涨 ${ann.upYears} 年 / 下跌 ${ann.downYears} 年 · 平均年度回报 ${(ann.avgRet * 100).toFixed(1)}% · 年化 ${(ann.cagr * 100).toFixed(1)}%</p>` : ""}`;
-    drawKline(document.getElementById("heatmapChart"), kl, { limit: 250 });
-    document.getElementById("heatmapChart").scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } catch (e) {
-    det.innerHTML = `<p class="muted">${esc(boardName)} 走势暂不可用（${esc(e.message || e)}）。东财板块 K 线偶发 rc=102 限流，稍后重试。</p>`;
+function drawHeatmapTreemap(data, idx, per) {
+  const el = document.getElementById("heatmapBody");
+  const meta = document.getElementById("heatmapMeta");
+  const wrapW = el.clientWidth || 1000;
+  const wrapH = Math.round(Math.max(420, Math.min(620, wrapW * 0.62)));
+  const groups = {};
+  for (const s of data.stocks) {
+    const g = s.industry || "未分类";
+    (groups[g] = groups[g] || { name: g, value: 0, stocks: [] });
+    groups[g].value += s.totalMcap;
+    groups[g].stocks.push(s);
   }
+  const groupList = Object.values(groups).sort((a, b) => b.value - a.value);
+  for (const g of groupList) {
+    g.stocks.sort((a, b) => b.totalMcap - a.totalMcap);
+    let wsum = 0, vsum = 0;
+    for (const s of g.stocks) {
+      const v = s[per.field];
+      if (v != null && isFinite(v)) { wsum += v * s.totalMcap; vsum += s.totalMcap; }
+    }
+    g.chg = vsum ? wsum / vsum : null;
+  }
+  const groupRects = squarifyLayout(groupList, 0, 0, wrapW, wrapH);
+  let tiles = "";
+  let labels = "";
+  for (const gr of groupRects) {
+    const g = gr.item;
+    const stockRects = squarifyLayout(g.stocks.map((s) => ({ ...s, value: s.totalMcap })), gr.x, gr.y, gr.w, gr.h);
+    for (const sr of stockRects) {
+      const s = sr.item;
+      const pct = s[per.field];
+      const c = heatColor(pct);
+      const showName = sr.w >= 52 && sr.h >= 34;
+      const showPct = sr.w >= 30 && sr.h >= 18;
+      tiles += `<div class="hm-tile" data-code="${esc(s.code)}" style="left:${sr.x.toFixed(1)}px;top:${sr.y.toFixed(1)}px;width:${sr.w.toFixed(1)}px;height:${sr.h.toFixed(1)}px;background:${c.bg};color:${c.fg}" title="${esc(s.name)} ${esc(s.code)} ${pct != null ? (pct > 0 ? "+" : "") + pct.toFixed(2) + "%" : ""} · 总市值 ${fmtMoney(s.totalMcap)}">${showName ? `<span class="hm-name">${esc(s.name)}</span>` : ""}${showPct ? `<span class="hm-pct">${pct != null ? (pct > 0 ? "+" : "") + pct.toFixed(1) + "%" : "—"}</span>` : ""}</div>`;
+    }
+    if (gr.w >= 110 && gr.h >= 34) {
+      labels += `<div class="hm-group-label" style="left:${(gr.x + 4).toFixed(1)}px;top:${(gr.y + 3).toFixed(1)}px">${esc(g.name)}${g.chg != null ? " " + (g.chg > 0 ? "+" : "") + g.chg.toFixed(2) + "%" : ""}</div>`;
+    }
+  }
+  const upd = data.maxUpdatedAt ? new Date(data.maxUpdatedAt * 1000) : data.fetchedAt;
+  const updStr = upd.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  meta.innerHTML = `数据时间 ${esc(updStr)} · ${esc(idx.name)}成分 ${data.total} 只${data.capped ? "，本图仅显示总市值前 " + HM_DISPLAY_CAP + " 只" : "，共 " + data.stocks.length + " 只"} · ${esc(per.note)} · <b>红色上涨 / 绿色下跌</b> · 方框面积 = 总市值 · 点击方框查看该股分析`;
+  el.innerHTML = `<div class="hm-treemap" style="height:${wrapH}px">${tiles}${labels}</div>`;
+  el.querySelectorAll(".hm-tile").forEach((t) => t.addEventListener("click", () => switchToStock(t.dataset.code)));
 }
 
 // ---------- 低估雷达 ----------
@@ -1386,12 +1531,7 @@ async function renderRadar() {
     el.innerHTML = html;
     el.querySelectorAll("[data-radar-code]").forEach((a) => a.addEventListener("click", (ev) => {
       ev.preventDefault();
-      document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "overview"));
-      document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-overview"));
-      document.getElementById("toolArea").style.display = "none";
-      document.getElementById("detailArea").style.display = "block";
-      document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
-      loadStock(a.dataset.radarCode);
+      switchToStock(a.dataset.radarCode);
     }));
   } catch (e) {
     el.innerHTML = `<p class="muted">低估雷达暂不可用（${esc(e.message || e)}）。<a href="#" id="radarRetry">重试</a></p>`;

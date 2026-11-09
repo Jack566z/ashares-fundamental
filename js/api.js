@@ -448,6 +448,82 @@ async function fetchHs300Constituents() {
   }
   return out;
 }
+// ---------- 9b. 指数成分股（通用，热力图用）----------
+// RPT_INDEX_CONSTITUENT（source=HSF10&client=WEB），2026-11-09 实测 6 个指数均可用：
+//   000300 沪深300=300 只、000001 上证指数≈2255 只、399001 深证成指=500 只、
+//   399006 创业板指=100 只、000688 科创50=50 只、000905 中证500=500 只。
+// 注意：表里同一代码可能多行（不同纳入日期），按代码去重；成分只有代码/名称，无市值。
+// 勿用 clist fs=b:MKxxxx：000300 在本机出口持续 rc=102。
+async function fetchIndexConstituents(indexCode) {
+  const out = [];
+  const seen = new Set();
+  for (let page = 1; page <= 8; page++) {
+    let rows;
+    try {
+      rows = await emDatacenter(
+        "RPT_INDEX_CONSTITUENT",
+        "SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,SECUCODE",
+        '(INDEX_CODE="' + indexCode + '")',
+        { pageNumber: page, pageSize: 500, sortColumns: "TRADE_DATE", sortTypes: "-1", source: "HSF10", client: "WEB" }
+      );
+    } catch (e) {
+      // 成分总数恰为 pageSize 整数倍时（如深证成指/中证500 各 500 只），翻到空页会报
+      // success=false“返回数据为空”（code 9201），视为已取完；第 1 页失败才是真错误。
+      if (page > 1 && /返回数据为空/.test(String(e.message || e))) break;
+      throw e;
+    }
+    for (const r of rows || []) {
+      const code = r.SECURITY_CODE;
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name: r.SECURITY_NAME_ABBR });
+    }
+    if (!rows || rows.length < 500) break;
+  }
+  return out;
+}
+
+// ---------- 9c. 东财批量行情（热力图用）----------
+// push2 ulist.np/get（会 302 跳到 push2delay），secids 逗号分隔（1.600519=沪市，0.000001=深市）。
+// 2026-11-09 茅台实测（与腾讯前复权日K对照，收盘 1444.99）：
+//   f3 当日涨跌幅 -0.55（对照 -0.55 ✓）；f109 5日涨跌幅 0.41（对照 0.41 ✓）；
+//   f110 20日涨跌幅 12.19（对照 12.19 ✓）；f24 60日涨跌幅 10.37（对照 10.37 ✓）；
+//   f160 年初至今 7.04（qfq 对照 7.10，差 0.06pp 为分红复权口径差 ✓）。
+//   f100 申万二级行业名（如“白酒Ⅱ”）；f20 总市值（元）；f21 流通市值（元）；
+//   f124 单只行情更新时间戳（秒；实测盘后不变，茅台 16:11:40、沪指 15:34:36）。
+// 分批拉：每批 ≤250 只（URL 过长会被截断），调用方用 fetchEmQuotesChunked。
+// 热力图批量拉数：VM 出口代理偶发 502/空回复，单次请求失败重试一次（间隔 1.5s）
+async function fetchWithRetry(fn) {
+  try { return await fn(); }
+  catch (e) { await new Promise((r) => setTimeout(r, 1500)); return await fn(); }
+}
+async function fetchEmQuotesBatch(secids) {
+  const url = API.EM_ULIST + "?secids=" + secids.join(",")
+    + "&fields=f2,f3,f12,f14,f20,f21,f24,f100,f109,f110,f124,f160"
+    + "&fltt=2&invt=2&ut=bd1d9ddb04089700cf9c27f6f742628";
+  const j = await fetchWithRetry(() => emFetch(url));
+  const diff = (j.data && j.data.diff) || [];
+  const out = {};
+  for (const it of diff) {
+    if (!it.f12) continue;
+    out[it.f12] = {
+      code: it.f12, name: it.f14, price: it.f2,
+      changePct: it.f3, chg5d: it.f109, chg20d: it.f110, chg60d: it.f24, chgYtd: it.f160,
+      totalMcap: it.f20, floatMcap: it.f21,
+      industry: it.f100 || "未分类",
+      updatedAt: it.f124,
+    };
+  }
+  return out;
+}
+async function fetchEmQuotesChunked(codes, chunkSize = 250) {
+  const out = {};
+  for (let i = 0; i < codes.length; i += chunkSize) {
+    const part = codes.slice(i, i + chunkSize);
+    Object.assign(out, await fetchEmQuotesBatch(part.map((c) => secid(c))));
+  }
+  return out;
+}
 // 腾讯 qt 分批（每批 100 只），合并返回 {code: quote}
 async function fetchTxQuotesChunked(codes, chunkSize = 100) {
   const out = {};

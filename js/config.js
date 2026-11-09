@@ -21,6 +21,8 @@ const API = {
   EM_KLINE: "https://push2his.eastmoney.com/api/qt/stock/kline/get",
   // 东财涨幅榜（市场异动）
   EM_CLIST: "https://push2.eastmoney.com/api/qt/clist/get",
+  // 东财批量行情（热力图用；push2 会 302 跳到 push2delay，浏览器自动跟随）
+  EM_ULIST: "https://push2.eastmoney.com/api/qt/ulist.np/get",
   // 东财数据中心（财报三大表 / 分红 / 预约披露 / 业绩预告）
   EM_DATACENTER: "https://datacenter-web.eastmoney.com/api/data/v1/get",
   // 腾讯行情（PE-TTM / PB / 换手 / 振幅 / 涨跌停，GBK 编码，CORS *）

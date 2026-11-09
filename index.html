@@ -514,11 +514,22 @@
       <div id="toolArea" style="display:none">
         <div class="tool-pane" id="tool-heatmap">
           <div class="card">
-            <h2>🔥 A 股市场热力图 <span class="muted" style="font-weight:400">东财行业 / 概念板块 · 红涨绿跌</span></h2>
-            <div class="seg" id="heatmapSeg">
-              <button data-hm="industry" class="active">行业板块</button>
-              <button data-hm="concept">概念板块</button>
+            <h2>🔥 A 股市场热力图 <span class="muted" style="font-weight:400">指数成分股 · 红涨绿跌</span></h2>
+            <div class="seg" id="hmIndexSeg">
+              <button data-hm-idx="000300" class="active">沪深300</button>
+              <button data-hm-idx="000001">上证指数</button>
+              <button data-hm-idx="399001">深证成指</button>
+              <button data-hm-idx="399006">创业板指</button>
+              <button data-hm-idx="000688">科创50</button>
+              <button data-hm-idx="000905">中证500</button>
             </div>
+            <div class="seg" id="hmPeriodSeg" style="margin-top:8px">
+              <button data-hm-per="day" class="active">天</button>
+              <button data-hm-per="week">周</button>
+              <button data-hm-per="month">月</button>
+              <button data-hm-per="year">年</button>
+            </div>
+            <p class="muted" id="heatmapMeta" style="margin:10px 0 8px"></p>
             <div id="heatmapBody"></div>
           </div>
         </div>
