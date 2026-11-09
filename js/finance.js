@@ -84,7 +84,7 @@ function calcMetrics(data) {
   m.changePct = tx.changePct != null ? tx.changePct : (q.changePct != null ? q.changePct : null);
   m.totalMcap = q.totalMcap || (tx.totalMcapYi ? tx.totalMcapYi * 1e8 : null);
   m.floatMcap = q.floatMcap || (tx.floatMcapYi ? tx.floatMcapYi * 1e8 : null);
-  m.totalShares = q.totalShares || null;
+  m.totalShares = q.totalShares || (m.totalMcap && m.price ? m.totalMcap / m.price : null); // 东财 f84 缺失时用市值/现价反推总股本（A 股口径，与 F10 每股指标同口径）
   m.divYieldEm = q.divYield || null;   // 东财口径股息率 %
   m.industry = q.industry || "";
   m.concepts = q.concepts || "";

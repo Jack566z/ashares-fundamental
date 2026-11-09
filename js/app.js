@@ -253,9 +253,10 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   if (btn.dataset.tab === "winrate" && !winrateLoaded) { winrateLoaded = true; renderWinrate(); }
   if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
   syncSidebarActive();
+  window.scrollTo(0, 0); // 切标签回到顶部（史密斯入口曾出现"点完没反应"：新面板须落到视口顶部）
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
-const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300target: renderHs300Target, hs300ret: renderHs300Ret, instholders: renderInstHolders, superholders: renderSuperHolders, mycharts: renderMycharts };
+const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300target: renderHs300Target, hs300ret: renderHs300Ret, instholders: renderInstHolders, superholders: renderSuperHolders, mycharts: renderMycharts, market: renderMarket };
 const toolLoaded = {};
 document.getElementById("toolTabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tool]");
@@ -291,6 +292,12 @@ document.getElementById("navGroups").addEventListener("click", (e) => {
     if (item.dataset.navTab) {
       const b = document.querySelector('#tabs button[data-tab="' + item.dataset.navTab + '"]');
       if (b) b.click();
+      // 兜底：直接激活目标面板并回到顶部（史密斯入口曾出现点完无切换）
+      document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x.dataset.tab === item.dataset.navTab));
+      document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-" + item.dataset.navTab));
+      document.getElementById("toolArea").style.display = "none";
+      document.getElementById("detailArea").style.display = "block";
+      window.scrollTo(0, 0);
     } else {
       const b = document.querySelector('#toolTabs button[data-tool="' + item.dataset.navTool + '"]');
       if (b) b.click();
@@ -1732,6 +1739,7 @@ function renderSmithSinglePanel(data, m, code) {
         </select></div>
       <button class="primary" id="smithAnalyzeBtn" style="padding:8px 18px;border:none;border-radius:8px;background:var(--orange,#e8912d);color:#fff;font-size:14px">分析</button>
       <button class="primary" id="smithExampleBtn" style="padding:8px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">参见示例</button>
+      <span id="smithAnalyzeNote" class="muted" style="font-size:13px"></span>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 280px;gap:12px;margin-bottom:12px" class="smith-top">
@@ -1764,8 +1772,11 @@ function renderSmithSinglePanel(data, m, code) {
     const m2 = c.match(/(\d{6})/);
     const target = m2 ? m2[1] : c;
     if (!target) return;
-    if (currentData && currentData.code === target) renderSmithSinglePanel(currentData, currentMetrics, target);
-    else loadStock(target);
+    if (currentData && currentData.code === target) {
+      renderSmithSinglePanel(currentData, currentMetrics, target);
+      const note = document.getElementById("smithAnalyzeNote");
+      if (note) note.textContent = "已重新计算 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    } else loadStock(target);
   });
 }
 
@@ -2036,6 +2047,7 @@ function switchToStock(code) {
   document.getElementById("detailArea").style.display = "block";
   document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
   syncSidebarActive();
+  window.scrollTo(0, 0);
   loadStock(code);
 }
 

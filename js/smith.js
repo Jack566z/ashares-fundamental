@@ -114,7 +114,15 @@ function smithTrend(values, higher) {
 // 单行打分：last（去年）1 分 + mid（中位/CAGR）1 分 + 趋势 1 分 + 稳定 1 分
 function smithScoreRow(def, series, horizon) {
   const vals = series.map((r) => r[def.field]).filter((v) => v != null && isFinite(v));
-  const last = series.length ? series[series.length - 1][def.field] : null;
+  let last = series.length ? series[series.length - 1][def.field] : null;
+  if (def.midType === "cagr") {
+    // 增长项的"去年"是最新一年同比增速，不是原值水平（原值当百分比会显示 34907908285200.0% 这类错数）；
+    // 仅当首尾均为正时同比才有意义，FCF 为负的年份记 N/A（不计分母）。
+    const yoy = smithYoY(series, def.field);
+    const prev = series.length > 1 ? series[series.length - 2][def.field] : null;
+    const lv = yoy.length ? yoy[yoy.length - 1] : null;
+    last = (lv != null && last != null && last > 0 && prev != null && prev > 0) ? lv : null;
+  }
   const lastOk = last != null && isFinite(last);
   let mid = null, midOk = false;
   if (def.midType === "cagr") {
@@ -145,15 +153,15 @@ function smithScoreRow(def, series, horizon) {
 
 // 12 行标准定义（要求与图版一致）
 const SMITH_DEFS = [
-  { key: "roce", label: "触碰", sub: "已用资本回报率", field: "roce", better: "high", req: 0.15, reqText: "大于15%", midType: "median" },
-  { key: "rev", label: "销售量", sub: "营收增长", field: "rev", better: "high", req: 0.07, reqText: "年增长率超过7%", midType: "cagr", stabField: "yoy" },
+  { key: "roce", label: "ROCE", sub: "已用资本回报率", field: "roce", better: "high", req: 0.15, reqText: "大于15%", midType: "median" },
+  { key: "rev", label: "销售额", sub: "营收增长", field: "rev", better: "high", req: 0.07, reqText: "年增长率超过7%", midType: "cagr", stabField: "yoy" },
   { key: "fcfps", label: "每股自由现金流", sub: "每股自由现金流增长", field: "fcfPs", better: "high", req: 0.10, reqText: "年增长率超过10%", midType: "cagr", stabField: "yoy" },
   { key: "gross", label: "毛利率", sub: "毛利率", field: "gross", better: "high", req: 0.40, reqText: "大于40%", midType: "median" },
   { key: "opmargin", label: "营业利润率", sub: "营业利润率", field: "opMargin", better: "high", req: 0.15, reqText: "大于15%", midType: "median" },
   { key: "cashconv", label: "现金转换", sub: "自由现金流 / 净利润", field: "cashConv", better: "high", req: 0.90, reqText: "超过90%", midType: "median" },
   { key: "fcfyield", label: "自由现金流收益率", sub: "自由现金流 / 市值", field: "fcfYield", better: "high", req: 0.043, reqText: "高于10年期债券收益率", midType: "median" },
   { key: "intcover", label: "利息保障倍数", sub: "营业利润 / 财务费用", field: "intCover", better: "high", req: 10, reqText: "超过 10 次", midType: "median" },
-  { key: "netdebtfcf", label: "净债务/自由现金流", sub: "净债务 / 自由现金流", field: "netDebtFcf", better: "low", req: 3, reqText: "3岁以下", midType: "median" },
+  { key: "netdebtfcf", label: "净债务/自由现金流", sub: "净债务 / 自由现金流", field: "netDebtFcf", better: "low", req: 3, reqText: "3年以下", midType: "median" },
   { key: "capexsales", label: "资本支出/销售额", sub: "购建长期资产 / 营收", field: "capexSales", better: "low", req: 0.10, reqText: "不到10%", midType: "median" },
   { key: "capexopcf", label: "资本支出/经营现金流", sub: "购建长期资产 / 经营现金流", field: "capexOpCf", better: "low", req: 0.20, reqText: "不到20%", midType: "median" },
   { key: "dilution", label: "稀释", sub: "股权激励 / 自由现金流", field: null, better: "low", req: 0.10, reqText: "不到10%", midType: "median", naReason: "股权激励费用（SBC）未从公开 F10 接口获得，无法计算" },

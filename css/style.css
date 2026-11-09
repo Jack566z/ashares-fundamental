@@ -726,3 +726,82 @@ html[data-theme="dark"] .cal-empty { border-color: #1e40af; color: #bfdbfe; }
 .mc-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .mc-chip a { color: var(--muted); text-decoration: none; font-weight: 700; }
 .mc-check { font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- 市场看板 v13 ---------- */
+.mk-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.mk-top-left { display: flex; align-items: center; gap: 10px; }
+.mk-top-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; }
+.mk-emo-badge { background: #fef3c7; color: #92400e; border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
+.mk-live-badge { background: var(--green-soft); color: var(--down); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
+.mk-idx-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.mk-idx-card { padding: 12px 14px; }
+.mk-idx-name { font-size: 14px; font-weight: 700; }
+.mk-idx-code { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+.mk-idx-price { font-size: 18px; font-weight: 700; }
+.mk-idx-price.up { color: var(--up); } .mk-idx-price.down { color: var(--down); }
+.mk-idx-chg { font-size: 13px; }
+.mk-stat-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 10px; }
+.mk-stat { padding: 12px 14px; }
+.mk-stat-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.mk-stat-v { font-size: 19px; font-weight: 700; line-height: 1.25; }
+.mk-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.mk-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+.mk-dist-bars { display: flex; align-items: flex-end; gap: 4px; height: 130px; padding-top: 6px; }
+.mk-dist-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.mk-dist-fill { width: 100%; border-radius: 3px 3px 0 0; }
+.mk-dist-fill.up { background: var(--up); } .mk-dist-fill.down { background: var(--down); }
+.mk-dist-bar span { font-size: 11px; font-weight: 700; }
+.mk-dist-bar i { font-size: 10px; color: var(--muted); font-style: normal; white-space: nowrap; }
+.mk-dist-stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 10px 0 6px; }
+.mk-dist-seg.up { background: var(--up); } .mk-dist-seg.down { background: var(--down); } .mk-dist-seg.flat { background: #cbd5e1; }
+.mk-dist-legend { display: flex; gap: 14px; font-size: 13px; }
+.mk-dist-avg { display: flex; gap: 20px; margin-top: 10px; font-size: 13px; }
+.mk-dist-avg b { margin-left: 6px; }
+.mk-trend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mk-trend-grid > div { background: var(--surface-3, #f1f5f9); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.mk-trend-grid span { display: block; font-size: 12px; }
+.mk-trend-grid b { font-size: 16px; }
+.mk-ladder-tier { border-top: 1px solid var(--line); padding: 8px 0; }
+.mk-ladder-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mk-ladder-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--up); min-width: 8px; }
+.mk-ladder-names { font-size: 13px; margin-top: 4px; line-height: 1.7; }
+.mk-heat-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mk-heat-col h3 { font-size: 13px; margin: 0 0 6px; }
+.mk-board-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.mk-board-row:first-of-type { border-top: none; }
+.mk-rank { color: var(--muted); font-size: 12px; width: 14px; text-align: right; flex-shrink: 0; }
+.mk-board-name { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-board-row .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+.mk-watch-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.mk-watch-row:first-of-type { border-top: none; }
+.mk-watch-row:hover { background: var(--surface-3, #f1f5f9); }
+.mk-watch-code { flex: 1; font-weight: 700; }
+.mk-watch-sig { color: var(--muted); font-size: 12px; }
+.mk-watch-price { text-align: right; }
+.mk-rank-row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+.mk-rank-card h3 { margin-top: 0; }
+.mk-rank-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.mk-rank-row:first-of-type { border-top: none; }
+.mk-rank-row a { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-sector-card { margin-bottom: 10px; }
+.mk-sector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mk-sector-stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 10px 0; font-size: 13px; }
+.mk-sector-stats b { margin-left: 6px; font-size: 15px; }
+.mk-mini-bars { display: flex; gap: 10px; align-items: flex-end; height: 92px; margin: 6px 0 10px; }
+.mk-mini-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; font-size: 12px; }
+.mk-mini-fill { width: 34px; border-radius: 3px 3px 0 0; }
+.mk-mini-fill.up { background: var(--up); } .mk-mini-fill.down { background: var(--down); }
+.mk-tbl td, .mk-tbl th { white-space: nowrap; }
+@media (max-width: 1100px) {
+  .mk-idx-row { grid-template-columns: repeat(2, 1fr); }
+  .mk-stat-row { grid-template-columns: repeat(3, 1fr); }
+  .mk-grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .mk-grid-3 { grid-template-columns: 1fr; }
+  .mk-rank-row4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .mk-stat-row { grid-template-columns: repeat(2, 1fr); }
+  .mk-grid-4 { grid-template-columns: 1fr; }
+  .mk-rank-row4 { grid-template-columns: 1fr; }
+  .mk-heat-cols { grid-template-columns: 1fr; }
+}
