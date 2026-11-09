@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股基本面分析</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ 密码门 ============ -->
+<div id="gate">
+  <div class="gate-card" id="gateCard">
+    <h1>🔒 A股基本面分析</h1>
+    <p class="sub">私人站点 · 请输入访问密码</p>
+    <input type="password" id="gatePw" placeholder="输入密码" autocomplete="current-password">
+    <div class="row-remember">
+      <input type="checkbox" id="gateRemember"> <label for="gateRemember">记住我（本浏览器长期免密）</label>
+    </div>
+    <button class="primary" id="gateBtn">进入</button>
+    <div class="gate-err" id="gateErr"></div>
+    <div class="gate-note">密码仅校验后进入本站，不会上传到任何服务器。<br>静态站密码只挡闲人，站内不存放任何私人数据。</div>
+  </div>
+</div>
+
+<!-- ============ 主界面 ============ -->
+<div id="app" style="display:none">
+  <header class="topbar">
+    <div class="logo">📈 A股<span>基本面</span>分析</div>
+    <div class="search-wrap">
+      <input id="searchInput" type="text" placeholder="搜索股票代码或名称，如 600519 / 贵州茅台" autocomplete="off" spellcheck="false">
+      <div class="search-results" id="searchResults"></div>
+    </div>
+    <div class="top-right">
+      <span id="marketClock"></span>
+      <button id="lockBtn" title="退出并锁定">🔒 锁定</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="card">
+        <h2>⭐ 自选股</h2>
+        <div class="watch-add">
+          <input id="watchAddInput" type="text" placeholder="输入 6 位代码添加" maxlength="6" inputmode="numeric">
+          <button id="watchAddBtn">添加</button>
+        </div>
+        <ul class="watch-list" id="watchList"></ul>
+        <p class="small" style="margin-top:8px">自选存在本浏览器 localStorage，可增删。点击切换分析对象。</p>
+      </div>
+      <div class="card">
+        <h2>🔥 市场异动 · 涨幅榜</h2>
+        <ul class="watch-list" id="moversList"></ul>
+        <p class="small" style="margin-top:8px">点击可直接分析该股。数据：东财涨幅榜。</p>
+      </div>
+      <div class="card">
+        <h2>ℹ️ 关于本站</h2>
+        <p class="muted">A 股版基本面分析：综合评分、DCF 估值、财报三大表、财报日历、市场异动。数据全部来自东财 / 腾讯公开接口，浏览器端直接调用，无后端、无 Key。模块与子项对照 AleInversor v4.39，无数据的子项明确标“暂不可用”。</p>
+      </div>
+    </aside>
+
+    <main class="content">
+      <div id="stockArea">
+        <div class="loading">正在加载数据…</div>
+      </div>
+
+      <div id="detailArea" style="display:none">
+        <!-- 股票头 -->
+        <div class="card">
+          <div class="stock-head">
+            <div>
+              <div class="sh-name" id="shName">—</div>
+              <div class="sh-code" id="shCode">—</div>
+              <div class="sh-meta" id="shMeta">—</div>
+              <div class="sh-tags" id="shTags"></div>
+            </div>
+            <div class="sh-price">
+              <div class="p" id="shPrice">—</div>
+              <div class="c" id="shChange">—</div>
+              <div class="small" id="shSub">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 综合评分 -->
+        <div class="card">
+          <h2>📊 综合评分 <span class="muted" style="font-weight:400">/ 100 · 六维打分，规则见“打分指南”</span></h2>
+          <div class="score-wrap">
+            <div class="score-total">
+              <div class="score-ring" id="scoreRing">
+                <div class="num" id="scoreNum">—</div>
+                <div class="den" id="scoreDen">/ 100</div>
+              </div>
+              <div class="score-grade" id="scoreGrade">—</div>
+              <div class="small" id="scoreNote"></div>
+            </div>
+            <div class="score-dims" id="scoreDims"></div>
+          </div>
+          <div class="score-note" id="scoreWarn" style="display:none"></div>
+        </div>
+
+        <!-- 关键指标 -->
+        <div class="card">
+          <h2>📌 关键指标 <span class="muted" style="font-weight:400" id="metricsBasis"></span></h2>
+          <div class="metrics" id="metricsGrid"></div>
+        </div>
+
+        <!-- 标签页（对照 AleInversor v4.39 的 13 个主模块 + 日历/行业/周期性） -->
+        <div class="tabs" id="tabs">
+          <button data-tab="overview" class="active">概况</button>
+          <button data-tab="valuation">估值</button>
+          <button data-tab="profitability">盈利</button>
+          <button data-tab="debt">负债</button>
+          <button data-tab="growth">成长</button>
+          <button data-tab="dividend">分红</button>
+          <button data-tab="tech">技术</button>
+          <button data-tab="history">历史演变</button>
+          <button data-tab="drawdown">价格与回撤</button>
+          <button data-tab="earnings">财报</button>
+          <button data-tab="forecast">预期</button>
+          <button data-tab="sector">行业</button>
+          <button data-tab="cyclicality">周期性</button>
+          <button data-tab="calendar">财报日历</button>
+          <button data-tab="rules">打分指南</button>
+        </div>
+
+        <!-- 概况 -->
+        <div class="tab-pane active" id="pane-overview">
+          <div class="card">
+            <h2>🏢 公司概况</h2>
+            <div id="ovProfile"></div>
+          </div>
+          <div class="card">
+            <h2>🧭 五维摘要</h2>
+            <div class="metrics" id="ovSummary"></div>
+          </div>
+        </div>
+
+        <!-- 估值 -->
+        <div class="tab-pane" id="pane-valuation">
+          <div class="card">
+            <h2>⚖️ 估值倍数 <span class="muted" style="font-weight:400">TTM 口径</span></h2>
+            <div id="valTable"></div>
+          </div>
+          <div class="card">
+            <h2>🧮 DCF 估值计算器 <span class="muted" style="font-weight:400">自由现金流折现 · 参数可调</span></h2>
+            <div class="dcf-grid">
+              <div class="dcf-field"><label>WACC 折现率（%）</label><input id="dcfWacc" type="number" step="0.5" min="1" max="30" value="8"></div>
+              <div class="dcf-field"><label>预测期增长率（%，留空=自动）</label><input id="dcfGrowth" type="number" step="0.5" min="-20" max="30" placeholder="自动"></div>
+              <div class="dcf-field"><label>永续增长率（%）</label><input id="dcfTerminal" type="number" step="0.5" min="0" max="5" value="2"></div>
+              <div class="dcf-field"><label>预测年数</label><input id="dcfYears" type="number" step="1" min="3" max="10" value="5"></div>
+            </div>
+            <button class="primary" id="dcfBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">重新计算</button>
+            <div id="dcfBody"></div>
+          </div>
+          <div class="card">
+            <h2>📈 EPS 预测 <span class="muted" style="font-weight:400">自设增速 + 退出 PE（非分析师一致预期）</span></h2>
+            <div class="dcf-grid">
+              <div class="dcf-field"><label>年均增速 g（%）</label><input id="projGrowth" type="number" step="0.5" min="-20" max="40" value="10"></div>
+              <div class="dcf-field"><label>预测年数</label><input id="projYears" type="number" step="1" min="1" max="10" value="3"></div>
+              <div class="dcf-field"><label>退出 PE（倍）</label><input id="projExitPe" type="number" step="0.5" min="1" max="100" value="22"></div>
+            </div>
+            <button class="primary" id="projBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">重新计算</button>
+            <div id="projBody"></div>
+          </div>
+        </div>
+
+        <!-- 盈利 -->
+        <div class="tab-pane" id="pane-profitability">
+          <div class="card">
+            <h2>💰 盈利能力 <span class="muted" style="font-weight:400">TTM 口径</span></h2>
+            <div id="profTable"></div>
+          </div>
+          <div class="card">
+            <h2>📊 利润率历史 · 年报口径</h2>
+            <div class="chart-box short"><canvas class="chart" id="profChart"></canvas></div>
+            <div id="profMedians"></div>
+          </div>
+        </div>
+
+        <!-- 负债 -->
+        <div class="tab-pane" id="pane-debt">
+          <div class="card">
+            <h2>🏦 负债与偿债能力</h2>
+            <div id="debtTable"></div>
+          </div>
+          <div class="card">
+            <h2>📊 债务结构 · 最新一期</h2>
+            <div id="debtStruct"></div>
+            <h3>债务历史 · 年报</h3>
+            <div id="debtHist"></div>
+          </div>
+        </div>
+
+        <!-- 成长 -->
+        <div class="tab-pane" id="pane-growth">
+          <div class="card">
+            <h2>🚀 成长 · 复合增速 CAGR</h2>
+            <div id="growthTable"></div>
+          </div>
+          <div class="card">
+            <h2>📅 季度增速 · 同比</h2>
+            <div id="growthQuarterly"></div>
+          </div>
+        </div>
+
+        <!-- 分红 -->
+        <div class="tab-pane" id="pane-dividend">
+          <div class="card">
+            <h2>💰 分红指标</h2>
+            <div id="divMetrics"></div>
+          </div>
+          <div class="card">
+            <h2>📊 年度派息历史 · 每 10 股派息（元，税前）</h2>
+            <div class="chart-box short"><canvas class="chart" id="divChart"></canvas></div>
+            <div id="divTable"></div>
+          </div>
+        </div>
+
+        <!-- 技术 -->
+        <div class="tab-pane" id="pane-tech">
+          <div class="card">
+            <h2>📈 K 线走势 <span class="muted" style="font-weight:400">前复权 · 红涨绿跌 · 叠加布林带 + MA50/200</span></h2>
+            <div class="seg" id="klineSeg">
+              <button data-klt="101" class="active">日K</button>
+              <button data-klt="102">周K</button>
+              <button data-klt="103">月K</button>
+            </div>
+            <div class="chart-box tall"><canvas class="chart" id="klineChart"></canvas></div>
+            <p class="muted" id="klineNote"></p>
+          </div>
+          <div class="card">
+            <h2>📉 振荡指标</h2>
+            <h3>RSI(14) · 超买 70 / 超卖 30</h3>
+            <div class="chart-box short"><canvas class="chart" id="rsiChart"></canvas></div>
+            <h3>MACD(12,26,9)</h3>
+            <div class="chart-box short"><canvas class="chart" id="macdChart"></canvas></div>
+            <h3>随机指标 KD(14,3,3) 与 Williams %R(14)</h3>
+            <div class="chart-box short"><canvas class="chart" id="stochChart"></canvas></div>
+            <div id="techTable"></div>
+          </div>
+          <div class="card">
+            <h2>🎯 信号与关键价位</h2>
+            <div id="techSignals"></div>
+          </div>
+        </div>
+
+        <!-- 历史演变 -->
+        <div class="tab-pane" id="pane-history">
+          <div class="card">
+            <h2>📅 历史演变 · 年报口径</h2>
+            <div class="chart-box short"><canvas class="chart" id="histChart"></canvas></div>
+            <div id="histTable"></div>
+          </div>
+          <div class="card">
+            <h2>🏦 资产负债结构 · 年报</h2>
+            <div id="histBalance"></div>
+          </div>
+          <div class="card">
+            <h2>💵 现金流结构 · 年报</h2>
+            <div id="histCashflow"></div>
+          </div>
+          <div class="card">
+            <h2>📏 每股指标 · 年报</h2>
+            <div id="histPerShare"></div>
+          </div>
+        </div>
+
+        <!-- 价格与回撤 -->
+        <div class="tab-pane" id="pane-drawdown">
+          <div class="card">
+            <h2>📉 价格与回撤</h2>
+            <div class="chart-box tall"><canvas class="chart" id="ddChart"></canvas></div>
+            <div class="metrics" id="ddStats" style="margin-top:10px"></div>
+          </div>
+          <div class="card">
+            <h2>📋 回撤明细</h2>
+            <div id="ddDetail"></div>
+          </div>
+        </div>
+
+        <!-- 财报 -->
+        <div class="tab-pane" id="pane-earnings">
+          <div class="card">
+            <h2>🧾 财报 · 三大表 <span class="muted" style="font-weight:400">季度行是年内累计值；TTM = 本期累计 + 上年全年 − 上年同期</span></h2>
+            <div id="earningsBody"></div>
+          </div>
+        </div>
+
+        <!-- 预期 -->
+        <div class="tab-pane" id="pane-forecast">
+          <div class="card">
+            <h2>🔮 预期 · 业绩预告</h2>
+            <div id="forecastBody"></div>
+          </div>
+          <div class="card">
+            <h2>📊 历史 PE <span class="muted" style="font-weight:400">年末收盘价 / 当年 EPS（前复权口径，近似）</span></h2>
+            <div id="peHistTable"></div>
+          </div>
+          <div class="card">
+            <h2>⚠️ 一致预期（分析师）</h2>
+            <div id="consensusNote"></div>
+          </div>
+        </div>
+
+        <!-- 行业 -->
+        <div class="tab-pane" id="pane-sector">
+          <div class="card">
+            <h2>🏭 行业</h2>
+            <div id="sectorBody"></div>
+          </div>
+        </div>
+
+        <!-- 周期性 -->
+        <div class="tab-pane" id="pane-cyclicality">
+          <div class="card">
+            <h2>🔄 周期性 · vs 沪深300</h2>
+            <div id="cycBody"></div>
+          </div>
+        </div>
+
+        <!-- 财报日历 -->
+        <div class="tab-pane" id="pane-calendar">
+          <div class="card">
+            <h2>🗓️ 财报日历 <span class="muted" style="font-weight:400">预约披露时间 · 东财</span></h2>
+            <div id="calBody"></div>
+          </div>
+        </div>
+
+        <!-- 打分指南 -->
+        <div class="tab-pane" id="pane-rules">
+          <div class="card rules">
+            <h2>📖 打分指南 · 评分与 DCF 公式全公开</h2>
+            <p>综合评分满分 100，六个维度权重：估值 20 / 盈利 25 / 负债 15 / 成长 20 / 分红 10 / 技术 10。每个维度的档位如下；无数据时该项得 0 分并注明。ETF / 指数类无财报数据，只计估值 + 技术（满分 30），并注明“部分评分”。</p>
+            <h4>估值（20 分）= PE-TTM（12 分）+ PB（8 分）</h4>
+            <table class="tbl"><tr><th>PE-TTM</th><th>得分</th><th>PB</th><th>得分</th></tr>
+            <tr><td>&lt; 10</td><td>12</td><td>&lt; 1</td><td>8</td></tr>
+            <tr><td>10 ~ 15</td><td>10</td><td>1 ~ 2</td><td>6</td></tr>
+            <tr><td>15 ~ 20</td><td>8</td><td>2 ~ 4</td><td>4</td></tr>
+            <tr><td>20 ~ 30</td><td>6</td><td>4 ~ 8</td><td>2</td></tr>
+            <tr><td>30 ~ 50</td><td>3</td><td>≥ 8</td><td>0</td></tr>
+            <tr><td>≥ 50 或 ≤ 0（亏损）</td><td>0</td><td></td><td></td></tr></table>
+            <h4>盈利（25 分）= ROE（TTM，15 分）+ 净利率（TTM，10 分）</h4>
+            <table class="tbl"><tr><th>ROE</th><th>得分</th><th>净利率</th><th>得分</th></tr>
+            <tr><td>&gt; 20%</td><td>15</td><td>&gt; 20%</td><td>10</td></tr>
+            <tr><td>15 ~ 20%</td><td>12</td><td>10 ~ 20%</td><td>7</td></tr>
+            <tr><td>10 ~ 15%</td><td>9</td><td>5 ~ 10%</td><td>4</td></tr>
+            <tr><td>5 ~ 10%</td><td>5</td><td>≤ 5%</td><td>1</td></tr>
+            <tr><td>≤ 5%</td><td>2</td><td></td><td></td></tr></table>
+            <h4>负债（15 分）= 资产负债率（12 分）+ 经营现金流 / 净利润（3 分）</h4>
+            <table class="tbl"><tr><th>资产负债率</th><th>得分</th><th>经营现金流 / 净利润</th><th>得分</th></tr>
+            <tr><td>&lt; 30%</td><td>12</td><td>&gt; 1</td><td>3</td></tr>
+            <tr><td>30 ~ 50%</td><td>9</td><td>0.5 ~ 1</td><td>2</td></tr>
+            <tr><td>50 ~ 70%</td><td>6</td><td>≤ 0.5</td><td>0</td></tr>
+            <tr><td>≥ 70%</td><td>3</td><td></td><td></td></tr></table>
+            <h4>成长（20 分）= 营收 TTM 同比（10 分）+ 归母利润 TTM 同比（10 分）</h4>
+            <table class="tbl"><tr><th>增速</th><th>得分（每项）</th></tr>
+            <tr><td>&gt; 20%</td><td>10</td></tr>
+            <tr><td>10 ~ 20%</td><td>8</td></tr>
+            <tr><td>0 ~ 10%</td><td>5</td></tr>
+            <tr><td>≤ 0</td><td>1</td></tr></table>
+            <h4>分红（10 分）= 股息率</h4>
+            <table class="tbl"><tr><th>股息率</th><th>得分</th></tr>
+            <tr><td>&gt; 4%</td><td>10</td></tr><tr><td>3 ~ 4%</td><td>8</td></tr>
+            <tr><td>2 ~ 3%</td><td>6</td></tr>
+            <tr><td>1 ~ 2%</td><td>4</td></tr>
+            <tr><td>0 ~ 1%</td><td>2</td></tr><tr><td>无分红</td><td>0</td></tr></table>
+            <h4>技术（10 分）= 站上 MA60（4 分）+ MA20 &gt; MA60（3 分）+ 距 52 周高点（3 分）</h4>
+            <p>距 52 周高点在 −10% 以内得 3 分，−10% ~ −20% 得 2 分，−20% 以上得 0 分。K 线为前复权日线。</p>
+            <h4>DCF 公式</h4>
+            <p>自由现金流 FCF（TTM）= 经营活动现金流净额（TTM）+ 投资活动现金流净额（TTM，投资流通常为负）。预测第 t 年 FCF = FCF₀ × (1+g)ᵗ，g 默认取近 3 年归母净利润复合增速（限 0~15%），可手动改。终值 TV = FCF₅ × (1+永续增长率) ÷ (WACC − 永续增长率)。企业价值 = Σ FCFₜ ÷ (1+WACC)ᵗ + TV ÷ (1+WACC)⁵。股权价值 = 企业价值 − 净负债（总负债 − 货币资金）。内在价值/股 = 股权价值 ÷ 总股本。FCF ≤ 0 或无现金流数据时 DCF 不适用。</p>
+            <h4>评级</h4>
+            <p>≥ 80 优秀；65 ~ 80 良好；50 ~ 65 一般；35 ~ 50 偏弱；&lt; 35 较弱。ETF 部分评分为同比例换算。</p>
+            <h4>参考：AleInversor 的档位（原文对照，仅供参考，不参与本站打分）</h4>
+            <table class="tbl"><tr><th>指标</th><th>档位</th></tr>
+            <tr><td>P/E</td><td>≤ 12 很便宜 · 13–18 合理 · 19–35 贵 · &gt; 35 很贵/负值</td></tr>
+            <tr><td>P/B</td><td>≤ 1 低 · 1–2 保守 · 2–8 溢价高 · &gt; 8 溢价极高</td></tr>
+            <tr><td>P/S</td><td>≤ 1 很便宜 · 1–3 合理 · 3–6 贵 · &gt; 6 很贵</td></tr>
+            <tr><td>EV/EBITDA</td><td>≤ 6 有吸引力 · 6–10 合理 · 10–20 贵 · &gt; 20 很贵</td></tr>
+            <tr><td>PEG</td><td>&lt; 1 有吸引力 · 1–2 合理到偏贵 · 2–3.5 贵 · &gt; 3.5 很贵</td></tr>
+            <tr><td>ROE</td><td>≥ 18% 优秀 · 12–18% 好 · 7–12% 低 · &lt; 7% 或负值</td></tr>
+            <tr><td>ROIC</td><td>≥ 12% 创造价值 · 8–12% 可接受 · 4–8% 低 · &lt; 4% 或负值</td></tr>
+            <tr><td>净利率</td><td>≥ 12% 优秀 · 6–12% 好 · 2–6% 低 · &lt; 2% 或负值</td></tr>
+            <tr><td>Deuda/Equity</td><td>≤ 0.3 极低 · 0.3–1.5 适中 · 1.5–3 高 · &gt; 3 危险</td></tr>
+            <tr><td>流动比率</td><td>≥ 2 优秀 · 1.5–2 好 · 1–1.5 偏紧 · &lt; 1 紧张</td></tr>
+            <tr><td>Deuda/EBITDA</td><td>≤ 2 可控 · 2–3 标准 · 3–4.5 高 · &gt; 4.5 过高</td></tr>
+            <tr><td>股息率</td><td>2.5–6% 有吸引力 · 1–2.5% 低 · &gt; 6% 核查可持续性 · 0% 无分红（中性）</td></tr>
+            <tr><td>Payout</td><td>≤ 50% 可持续 · 50–70% 适中 · 70–85% 偏高 · &gt; 100% 不可持续</td></tr></table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="site">
+    仅供学习参考，不构成投资建议；数据来自东财公开接口（行情 / K线 / 财报 / 分红 / 日历）与腾讯公开行情接口（PE / PB / 搜索联想 / K线备用源）。<br>
+    行情为延迟数据；财报季度行为年内累计值，TTM 口径见“打分指南”。EBIT ≈ 营业利润 + 财务费用；EV = 总市值 + 总负债 − 货币资金（总负债作有息负债代理）。本站为纯静态页面，无后端、不收集任何信息。
+  </footer>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/api.js"></script>
+<script src="js/finance.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
