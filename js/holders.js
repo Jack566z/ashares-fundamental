@@ -1,5 +1,8 @@
 // ============================================================
-// 机构和超级大户（v6，2026-11-09）
+// 机构持仓 / 超级大户持仓（v9，2026-11-09：由 v6 的单个模块拆分）
+// 机构持仓：13F 式跨股表（自选股）+ 选中个股详情（十大股东/流通股东/
+//   基金持仓/机构汇总/股东户数）；超级大户持仓：跨股大户汇总 + 大户
+//   详情三页（职位/表现/结构）。两个工具经 TOOL_LOADERS 独立懒加载。
 // 数据：同源季度快照 data/holders/<code>.json，由 tools/refresh_holders.py 生成，
 // 源为东财 F10 股东研究 PageAjax（十大股东 sdgd / 十大流通股东 sdltgd /
 // 股东户数 gdrs / 基金持仓 jjcg / 机构持股汇总 jgcc）。
@@ -8,6 +11,8 @@
 // 9501“报表配置不存在”；雪球 403、巨潮反爬。快照每季披露后刷新，按季度累积。
 // PageAjax 的 dates=/date=/endDate= 参数均被忽略，永远只返回最新一季，
 // 所以历史季度只能靠每次披露后及时跑脚本累积，无法事后补拉。
+// 只有一期快照（2026Q3）：凡需两期对比的列（新进/增持/减持/净买入/共识）
+// 一律标暂不可用，不编数；市值与机构占比等当期数正常算。
 // 依赖的全局：esc / chgClass / currentCode / DEFAULT_WATCHLIST /
 // fetchEmQuotesBatch / fetchKline / fetchHs300LongKline / switchToStock /
 // drawBars / metricCard / naRow / fmtMoney / fmtPct。
@@ -17,10 +22,22 @@ const HOLDERS_SNAP_DIR = "data/holders/";
 const holdersCache = {};        // code -> snapshot JSON | null（无快照）
 const holdersCrossCache = { loaded: false, investors: null, codes: [] };
 let holdersDetail = null;       // {name, typeKey, typeLabel, quarter}
-let holdersTypeFilter = "all";  // 当前股股东表类型过滤
-let holdersCrossFilter = "all"; // 跨股汇总类型过滤
-let holdersQuarter = null;      // 当前股所选季度（null = 最新）
-let holdersRenderSeq = 0;       // 防旧的异步渲染覆盖新股
+let holdersRenderSeq = 0;       // 防旧的异步渲染覆盖新视图（机构/大户两工具共用）
+// 机构持仓工具状态
+let instSortTab = "value";      // 排序：value=按价值 | ratio=公司占比 | 其余 5 个为两期对比口径（暂不可用，回退按价值）
+let instSearch = "";
+let instSector = "all";
+let instMcap = "all";           // all | large | mid | small
+let instMinFunds = 0;           // 0=全部 | 10 | 20 | 30（基金只数下限）
+let instDetailCode = null;      // 详情区当前股票
+let instQuarter = null;         // 详情区所选季度（null = 最新）
+let instTypeFilter = "all";     // 详情区股东表类型过滤
+let instRows = [];              // 机构持仓表行（快照+行情合并）
+let instRenderToken = 0;        // 机构工具异步渲染序号
+// 超级大户持仓工具状态
+let superFilter = "all";        // 跨股汇总类型过滤
+let superSearch = "";           // 大户名搜索
+let superRenderToken = 0;       // 大户工具异步渲染序号
 const holdersPerfCache = {};    // 表现计算缓存：positions key -> perf 结果
 
 // ---------- 股东分类 ----------
@@ -224,44 +241,194 @@ async function holdersPerfData(positions, quarterEnd) {
   return res;
 }
 
-// ---------- 总览 ----------
-// 入口：app.js loadStock 调用 renderHolders(data)；切换股票时回到总览。
-async function renderHolders(data) {
-  const el = document.getElementById("holdersBody");
-  holdersDetail = null;
-  const code = currentCode;
-  const token = ++holdersRenderSeq;
-  el.innerHTML = `<div class="loading">正在加载股东快照…</div>`;
-  const snap = await holdersLoad(code);
-  if (token !== holdersRenderSeq) return; // 已切到别的股票
-  if (!snap) {
-    el.innerHTML =
-      `<p>机构持仓与超级大户：<span class="badge">暂不可用</span></p>
-       <p class="muted" style="margin-top:8px">本站股东快照目前只覆盖 12 只自选股与贵州茅台（${esc(code)} 不在其中）。快照由 tools/refresh_holders.py 从东财 F10 股东研究接口拉取，每季披露后刷新；新股可跑该脚本补拉后随站部署。</p>
-       <p style="margin-top:10px">手动查看：<a href="https://quote.eastmoney.com/${esc(txMarket(code))}${esc(code)}.html" target="_blank" rel="noopener">东财个股页（F10 → 股东研究）</a> · <a href="https://www.cninfo.com.cn/new/index" target="_blank" rel="noopener">巨潮资讯</a></p>`;
-    return;
+// ---------- 机构持仓工具 ----------
+// 入口：TOOL_LOADERS.instholders。上半部分为 13F 式跨股表（自选股），
+// 下半部分为选中个股的详情（十大股东/流通股东/基金持仓/机构汇总/股东户数）。
+// 只有一期快照（2026Q3）：凡需两期对比的列（新进/增持/减持/净买入/共识）
+// 一律标暂不可用，不编数；市值与机构占比等当期数正常算。
+const INST_QOQ_COLS = ["新的", "他们补充", "它们减少", "他们什么都没", "共识", "净应计额", "净活动", "购买百分比"];
+const INST_SORT_TABS = [
+  { key: "netbuy", label: "净购买量" },
+  { key: "new", label: "更多新帖子" },
+  { key: "buymore", label: "通过购买获得更多资金" },
+  { key: "netsell", label: "净销售额" },
+  { key: "exit", label: "更多出口" },
+  { key: "value", label: "按价值" },
+  { key: "ratio", label: "公司占比" },
+];
+const INST_QOQ_TABS = ["netbuy", "new", "buymore", "netsell", "exit"];
+
+async function renderInstHolders() {
+  const el = document.getElementById("instHoldersBody");
+  if (!el) return;
+  const token = ++instRenderToken;
+  el.innerHTML = `<div class="loading">正在加载股东快照与行情…</div>`;
+  const codes = DEFAULT_WATCHLIST.map((s) => s.code).filter((c) => c !== "515220");
+  const snaps = await Promise.all(codes.map((c) => holdersLoad(c)));
+  let quotes = {};
+  try { quotes = await fetchEmQuotesBatch(codes.map((c) => secid(c))); } catch (e) { quotes = {}; }
+  if (token !== instRenderToken) return;
+  const rows = [];
+  for (const snap of snaps) {
+    if (!snap || snap.empty) continue;
+    const qs = Object.keys(snap.quarters || {}).sort().reverse();
+    if (!qs.length) continue;
+    const q = snap.quarters[qs[0]];
+    const jgcc = {};
+    for (const r of q.jgcc || []) jgcc[r.ORG_TYPE] = r;
+    const qu = quotes[snap.code] || {};
+    const price = qu.price != null ? qu.price : null;
+    const org0 = jgcc["00"] || null;
+    rows.push({
+      code: snap.code, name: snap.name, quarter: qs[0],
+      industry: qu.industry || "未分类",
+      price, totalMcap: qu.totalMcap != null ? qu.totalMcap : null,
+      orgNum: org0 ? org0.TOTAL_ORG_NUM : null,
+      fundNum: jgcc["01"] ? jgcc["01"].TOTAL_ORG_NUM : (q.jjcg || []).length,
+      instRatio: org0 && org0.TOTAL_SHARES_RATIO != null ? org0.TOTAL_SHARES_RATIO : null,
+      instRatioTotal: org0 && org0.ALL_SHARES_RATIO != null ? org0.ALL_SHARES_RATIO : null,
+      instValue: (org0 && org0.TOTAL_FREE_SHARES != null && price != null) ? org0.TOTAL_FREE_SHARES * price : null,
+      snap,
+    });
   }
-  if (snap.empty) {
-    el.innerHTML =
-      `<p>机构持仓与超级大户：<span class="badge">暂不可用</span></p>
-       <p class="muted" style="margin-top:8px">${esc(snap.name || code)}（${esc(code)}）是 ETF，无股东结构：${esc(snap.empty_reason || "无十大股东/基金持仓披露")}。ETF 的持仓明细见基金公司定期报告。</p>
-       <p style="margin-top:10px">手动查看：<a href="https://quote.eastmoney.com/${esc(txMarket(code))}${esc(code)}.html" target="_blank" rel="noopener">东财 ETF 页</a></p>`;
-    return;
+  instRows = rows;
+  if (!instDetailCode || !rows.some((r) => r.code === instDetailCode)) {
+    instDetailCode = (typeof currentCode === "string" && rows.some((r) => r.code === currentCode)) ? currentCode : (rows.length ? rows[0].code : null);
   }
-  holdersRenderOverview(snap);
-  if (document.querySelector("#pane-holders.active")) holdersEnsureCross();
+  instRenderTool();
 }
 
-function holdersRenderOverview(snap) {
-  const el = document.getElementById("holdersBody");
+function instFilteredRows() {
+  let rows = instRows.slice();
+  if (instSearch.trim()) {
+    const kw = instSearch.trim().toLowerCase();
+    rows = rows.filter((r) => r.code.indexOf(kw) >= 0 || String(r.name || "").toLowerCase().indexOf(kw) >= 0);
+  }
+  if (instSector !== "all") rows = rows.filter((r) => r.industry === instSector);
+  if (instMcap !== "all") {
+    rows = rows.filter((r) => {
+      const mc = r.totalMcap;
+      if (mc == null) return false;
+      if (instMcap === "large") return mc >= 1e11;
+      if (instMcap === "mid") return mc >= 1e10 && mc < 1e11;
+      return mc < 1e10;
+    });
+  }
+  if (instMinFunds > 0) rows = rows.filter((r) => (r.fundNum || 0) >= instMinFunds);
+  if (instSortTab === "ratio") rows.sort((a, b) => (b.instRatio == null ? -1 : b.instRatio) - (a.instRatio == null ? -1 : a.instRatio));
+  else rows.sort((a, b) => (b.instValue || 0) - (a.instValue || 0));
+  return rows;
+}
+
+function instRenderTool() {
+  const el = document.getElementById("instHoldersBody");
+  if (!el) return;
+  const sectors = ["all"].concat([...new Set(instRows.map((r) => r.industry))].sort());
+  let html = "";
+  html += `<p class="muted" style="margin-bottom:10px">数据：东财 F10 股东研究同源季度快照（十大股东 / 十大流通股东 / 股东户数 / 基金持仓 / 机构持股汇总），当前为 <b>2026 年三季报</b>一期。A 股机构持仓按季报披露（季后约 1 个月内），不是美国 13F（季后 45 天内）；13F 只统计管理资产超 1 亿美元的基金经理，本站只统计自选股的披露口径。点击股票代码在下方看该股详情。</p>`;
+  html += `<div class="metrics">`;
+  html += metricCard("分析的公司", instRows.length + " 只", "有股东快照的自选股 · 2026年三季报");
+  html += metricCard("净购买量增加", "暂不可用", "需两期快照对比机构持股合计变动");
+  html += metricCard("更高的净销售额", "暂不可用", "需两期快照对比机构持股合计变动");
+  html += metricCard("更多新条目", "暂不可用", "需两期快照对比新进机构数");
+  html += `</div>`;
+  html += `<div class="seg" id="instSortTabs" style="margin-top:14px">${INST_SORT_TABS.map((t) => `<button data-isort="${t.key}" class="${instSortTab === t.key ? "active" : ""}">${t.label}</button>`).join("")}</div>`;
+  html += `<div class="filter-row">
+    <input id="instSearch" type="text" placeholder="搜索股票或公司…" value="${esc(instSearch)}" style="flex:1;min-width:160px">
+    <select id="instSector">${sectors.map((s) => `<option value="${esc(s)}" ${s === instSector ? "selected" : ""}>${s === "all" ? "所有领域" : esc(s)}</option>`).join("")}</select>
+    <select id="instMcap">
+      <option value="all" ${instMcap === "all" ? "selected" : ""}>任何大写字母</option>
+      <option value="large" ${instMcap === "large" ? "selected" : ""}>大盘（≥1000亿）</option>
+      <option value="mid" ${instMcap === "mid" ? "selected" : ""}>中盘（100–1000亿）</option>
+      <option value="small" ${instMcap === "small" ? "selected" : ""}>小盘（&lt;100亿）</option>
+    </select>
+    <select id="instMinFunds">
+      <option value="0" ${instMinFunds === 0 ? "selected" : ""}>全部资金</option>
+      <option value="10" ${instMinFunds === 10 ? "selected" : ""}>≥ 10 只基金</option>
+      <option value="20" ${instMinFunds === 20 ? "selected" : ""}>≥ 20 只基金</option>
+      <option value="30" ${instMinFunds === 30 ? "selected" : ""}>≥ 30 只基金</option>
+    </select>
+  </div>`;
+  html += `<div id="instTableWrap"></div>`;
+  html += `<h3 style="margin-top:18px">个股机构持仓详情 · <select id="instDetailStock" style="font-size:13px;padding:2px 6px">${instRows.map((r) => `<option value="${r.code}" ${r.code === instDetailCode ? "selected" : ""}>${esc(r.name)}（${r.code}）</option>`).join("")}</select></h3><div id="instDetailBody"></div>`;
+  el.innerHTML = html;
+  const st = document.getElementById("instSortTabs");
+  if (st) st.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-isort]");
+    if (!b) return;
+    instSortTab = b.dataset.isort;
+    st.querySelectorAll("button[data-isort]").forEach((x) => x.classList.toggle("active", x === b));
+    instRenderTable();
+  });
+  const si = document.getElementById("instSearch");
+  if (si) si.addEventListener("input", () => { instSearch = si.value; instRenderTable(); });
+  const ss = document.getElementById("instSector");
+  if (ss) ss.addEventListener("change", () => { instSector = ss.value; instRenderTable(); });
+  const sm = document.getElementById("instMcap");
+  if (sm) sm.addEventListener("change", () => { instMcap = sm.value; instRenderTable(); });
+  const sf = document.getElementById("instMinFunds");
+  if (sf) sf.addEventListener("change", () => { instMinFunds = parseInt(sf.value, 10) || 0; instRenderTable(); });
+  const ds = document.getElementById("instDetailStock");
+  if (ds) ds.addEventListener("change", () => { instDetailCode = ds.value; instQuarter = null; instRenderDetail(); });
+  instRenderTable();
+  instRenderDetail();
+}
+
+function instRenderTable() {
+  const wrap = document.getElementById("instTableWrap");
+  if (!wrap) return;
+  const rows = instFilteredRows();
+  const qoqActive = INST_QOQ_TABS.indexOf(instSortTab) >= 0;
+  let html = "";
+  if (qoqActive) html += `<div class="note-box">按「${esc(INST_SORT_TABS.find((t) => t.key === instSortTab).label)}」排序需两期快照对比，当前仅一期（2026Q3），暂不可用；以下仍按机构持仓合计市值排序。</div>`;
+  html += `<p class="muted">显示前 ${rows.length} 只，共 ${instRows.length} 只。涉及季度变化的 ${INST_QOQ_COLS.length} 列（${INST_QOQ_COLS.join(" / ")}）暂不可用：仅一期快照，需第二期快照积累后才可算；单元格以“—”表示。</p>`;
+  html += `<div class="tbl-wrap"><table class="tbl"><tr><th>股票</th><th>公司</th><th>市值</th><th>资金</th><th>新的</th><th>他们补充</th><th>它们减少</th><th>他们什么都没</th><th>共识</th><th>净应计额</th><th>净活动</th><th>购买百分比</th><th>机构百分比</th></tr>`;
+  html += rows.map((r) => `<tr>
+    <td class="num"><a href="#" data-inst-stock="${r.code}">${r.code}</a></td>
+    <td style="text-align:left">${esc(r.name)}<br><span class="muted" style="font-size:12px">${esc(r.industry)}</span> <a href="#" data-inst-analyze="${r.code}">进仪表盘 →</a></td>
+    <td class="num">${r.totalMcap != null ? fmtMoney(r.totalMcap) : "—"}</td>
+    <td class="num">${r.orgNum != null ? r.orgNum + " 家" : "—"}<br><span class="muted" style="font-size:12px">基金 ${r.fundNum != null ? r.fundNum + " 只" : "—"}</span></td>
+    <td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>
+    <td class="num">${r.instRatio != null ? r.instRatio.toFixed(2) + "%" : "—"}<br><span class="muted" style="font-size:12px">${r.instRatioTotal != null ? "占总股本 " + r.instRatioTotal.toFixed(2) + "%" : ""}</span></td>
+  </tr>`).join("");
+  html += `</table></div>`;
+  html += `<p class="muted" style="margin-top:6px">口径：市值 = 东财实时行情总市值；资金 = 机构持股汇总（jgcc 00）机构家数，基金只数 = jgcc 01；机构百分比 = 机构持股合计占流通股（jgcc 00 TOTAL_SHARES_RATIO）；机构持仓合计市值（排序用）= 机构持股合计股数 × 现价。仅统计披露口径内的持仓，持仓市值为近似值。本信息仅供参考，不构成投资建议。</p>`;
+  wrap.innerHTML = html;
+  wrap.querySelectorAll("[data-inst-stock]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    instDetailCode = a.dataset.instStock;
+    const ds = document.getElementById("instDetailStock");
+    if (ds) ds.value = instDetailCode;
+    instQuarter = null;
+    instRenderDetail();
+    const db = document.getElementById("instDetailBody");
+    if (db && db.scrollIntoView) db.scrollIntoView();
+  }));
+  wrap.querySelectorAll("[data-inst-analyze]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchToStock(a.dataset.instAnalyze); }));
+}
+
+// 机构详情区的超级大户卡片 → 切到超级大户持仓工具并打开该大户详情
+function instOpenSuper(name) {
+  const b = document.querySelector('#toolTabs button[data-tool="superholders"]');
+  if (b) b.click();
+  holdersOpenDetail(name);
+}
+
+// ---------- 机构详情区：选中个股的十大股东 / 基金持仓 / 机构汇总 / 股东户数 ----------
+function instRenderDetail() {
+  const body = document.getElementById("instDetailBody");
+  if (!body) return;
+  const row = instRows.find((r) => r.code === instDetailCode);
+  if (!row) { body.innerHTML = `<p class="muted">请选择一只股票查看机构持仓详情。</p>`; return; }
+  const snap = row.snap;
   const quarters = Object.keys(snap.quarters || {}).sort().reverse();
   if (!quarters.length) {
-    el.innerHTML = `<p class="muted">该股快照中暂无季度数据。</p>`;
+    body.innerHTML = `<p class="muted">该股快照中暂无季度数据。</p>`;
     return;
   }
-  if (!holdersQuarter || quarters.indexOf(holdersQuarter) < 0) holdersQuarter = quarters[0];
-  const q = snap.quarters[holdersQuarter];
-  const qLabel = holdersQuarterLabel(holdersQuarter);
+  if (!instQuarter || quarters.indexOf(instQuarter) < 0) instQuarter = quarters[0];
+  const q = snap.quarters[instQuarter];
+  const qLabel = holdersQuarterLabel(instQuarter);
   const sdgdDate = (q.sdgd && q.sdgd.length && q.sdgd[0].END_DATE) ? q.sdgd[0].END_DATE.slice(0, 10) : null;
   const sdltgdDate = (q.sdltgd && q.sdltgd.length && q.sdltgd[0].END_DATE) ? q.sdltgd[0].END_DATE.slice(0, 10) : null;
   const jgcc = {};
@@ -279,12 +446,12 @@ function holdersRenderOverview(snap) {
   const filterKeys = ["all"].concat(Object.keys(presentKeys).sort());
   const filterChips = filterKeys.map((k) => {
     const label = k === "all" ? "全部" : (HOLDER_TYPE_LABEL[k] || k);
-    return `<button data-hfilter="${k}" class="${holdersTypeFilter === k ? "active" : ""}">${esc(label)}</button>`;
+    return `<button data-hfilter="${k}" class="${instTypeFilter === k ? "active" : ""}">${esc(label)}</button>`;
   }).join("");
 
   let html = "";
   html += `<p class="muted" style="margin-bottom:10px">数据：东财 F10 股东研究（十大股东/十大流通股东/股东户数/基金持仓/机构持股汇总），同源季度快照，快照更新于 ${esc((snap.fetched_at || "").slice(0, 10))}。`
-    + ` 季度：<select id="holdersQuarterSel" style="font-size:13px;padding:2px 6px">${quarters.map((d) => `<option value="${d}" ${d === holdersQuarter ? "selected" : ""}>${esc(holdersQuarterLabel(d))}</option>`).join("")}</select>`
+    + ` 季度：<select id="holdersQuarterSel" style="font-size:13px;padding:2px 6px">${quarters.map((d) => `<option value="${d}" ${d === instQuarter ? "selected" : ""}>${esc(holdersQuarterLabel(d))}</option>`).join("")}</select>`
     + ` <span class="muted">仅一期快照时季度选择器只有一项；每季披露后跑 tools/refresh_holders.py 累积。</span></p>`;
 
   // 摘要
@@ -299,8 +466,8 @@ function holdersRenderOverview(snap) {
   // 股东表过滤器
   html += `<div class="seg" id="holdersTypeFilter" style="margin-top:14px">${filterChips}</div>`;
 
-  html += holdersHolderTable("十大股东", q.sdgd || [], holdersTypeFilter, sdgdDate !== holdersQuarter ? "截至 " + sdgdDate + "（股权变动披露，非季报日）" : "截至 " + (sdgdDate || holdersQuarter));
-  html += holdersHolderTable("十大流通股东", q.sdltgd || [], holdersTypeFilter, "截至 " + (sdltgdDate || holdersQuarter));
+  html += holdersHolderTable("十大股东", q.sdgd || [], instTypeFilter, sdgdDate !== instQuarter ? "截至 " + sdgdDate + "（股权变动披露，非季报日）" : "截至 " + (sdgdDate || instQuarter));
+  html += holdersHolderTable("十大流通股东", q.sdltgd || [], instTypeFilter, "截至 " + (sdltgdDate || instQuarter));
 
   // 基金持仓（前 10 / 共 50）
   const jj = (q.jjcg || []).slice(0, 10);
@@ -331,31 +498,28 @@ function holdersRenderOverview(snap) {
     html += `<p class="muted">最新 ${esc(holdersQuarterShort(gdrs[gdrs.length - 1].END_DATE))}：${gdrs[gdrs.length - 1].HOLDER_TOTAL_NUM.toLocaleString("en-US")} 户，环比 ${gdrs[gdrs.length - 1].TOTAL_NUM_RATIO > 0 ? "+" : ""}${gdrs[gdrs.length - 1].TOTAL_NUM_RATIO.toFixed(2)}%，集中度 ${esc(gdrs[gdrs.length - 1].HOLD_FOCUS || "—")}，户均市值 ${fmtMoney(gdrs[gdrs.length - 1].AVG_HOLD_AMT)}。</p>`;
   }
 
-  // 超级大户（本股）
+  // 超级大户（本股，卡片点击 → 超级大户持仓工具的详情页）
   html += holdersSuperSection(snap, q);
 
-  // 跨自选股汇总（懒加载）
-  html += `<h3>超级大户在自选股中的持仓 <span class="muted" style="font-weight:400">（跨股汇总）</span></h3><div id="holdersCrossBody"><p class="muted">正在加载 12 只自选股快照…</p></div>`;
-
-  el.innerHTML = html;
+  body.innerHTML = html;
 
   // 绑定：季度选择、类型过滤
   const sel = document.getElementById("holdersQuarterSel");
-  if (sel) sel.addEventListener("change", () => { holdersQuarter = sel.value; holdersRenderOverview(snap); });
+  if (sel) sel.addEventListener("change", () => { instQuarter = sel.value; instRenderDetail(); });
   const ft = document.getElementById("holdersTypeFilter");
   if (ft) ft.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-hfilter]");
     if (!b) return;
-    holdersTypeFilter = b.dataset.hfilter;
-    holdersRenderOverview(snap);
+    instTypeFilter = b.dataset.hfilter;
+    instRenderDetail();
   });
   // 股东户数图
   const cv = document.getElementById("holdersGdrsChart");
   if (cv && gdrs.length >= 2) {
     drawBars(cv, gdrs.map((r) => ({ label: holdersQuarterShort(r.END_DATE), v1: r.HOLDER_TOTAL_NUM, v2: null })), { label1: "股东户数" });
   }
-  // 超级大户卡片点击 → 详情页
-  el.querySelectorAll("[data-super-name]").forEach((b) => b.addEventListener("click", () => holdersOpenDetail(b.dataset.superName)));
+  // 超级大户卡片点击 → 超级大户持仓工具详情页
+  body.querySelectorAll("[data-super-name]").forEach((b) => b.addEventListener("click", () => instOpenSuper(b.dataset.superName)));
 }
 
 function holdersHolderTable(title, rows, typeFilter, dateNote) {
@@ -444,45 +608,73 @@ async function holdersBuildCross() {
   return list;
 }
 
-async function holdersEnsureCross() {
-  const body = document.getElementById("holdersCrossBody");
-  if (!body) return;
-  if (holdersCrossCache.loaded) { holdersRenderCross(); return; }
+// ---------- 超级大户持仓工具 ----------
+// 入口：TOOL_LOADERS.superholders。列表 = 跨自选股汇总（实测大户）；
+// 点击大户 → 详情三页（职位/表现/结构），见 holdersOpenDetail。
+async function renderSuperHolders() {
+  const el = document.getElementById("superHoldersBody");
+  if (!el) return;
+  const token = ++superRenderToken;
+  el.innerHTML = `<div class="loading">正在加载自选股快照…</div>`;
   try {
     await holdersBuildCross();
-    holdersRenderCross();
   } catch (e) {
-    body.innerHTML = `<p class="muted">跨股汇总加载失败（${esc(e.message || e)}），可刷新页面重试。</p>`;
+    if (token !== superRenderToken) return;
+    el.innerHTML = `<p class="muted">跨股汇总加载失败（${esc(e.message || e)}），可刷新页面重试。</p>`;
+    return;
   }
+  if (token !== superRenderToken) return; // 期间已打开某大户详情，不覆盖
+  superRenderList();
 }
 
-function holdersRenderCross() {
-  const body = document.getElementById("holdersCrossBody");
-  if (!body) return;
+function superRenderList() {
+  const el = document.getElementById("superHoldersBody");
+  if (!el) return;
+  if (!holdersCrossCache.loaded) { renderSuperHolders(); return; }
+  holdersDetail = null;
   const list = holdersCrossCache.investors || [];
   const types = ["all", "shebao", "qfii", "huijin", "pension", "person"].filter((k) => k === "all" || list.some((x) => x.typeKey === k));
-  let html = `<div class="seg" id="holdersCrossFilter">${types.map((k) => `<button data-hcfilter="${k}" class="${holdersCrossFilter === k ? "active" : ""}">${k === "all" ? "全部" : esc(HOLDER_TYPE_LABEL[k])}</button>`).join("")}</div>`;
-  const filtered = list.filter((x) => holdersCrossFilter === "all" || x.typeKey === holdersCrossFilter);
+  let html = "";
+  html += `<p class="muted" style="margin-bottom:10px"><b>${list.length} 位可搜索的超级大户</b>（社保基金 / QFII / 汇金·证金 / 养老金 / 个人大户），来自自选股 2026 年三季报十大流通股东。点击大户名看详情（职位 / 表现 / 结构）。葛卫东未进任一自选股前十，本站不列。范围外的持仓本站无数据。</p>`;
+  html += `<div class="filter-row">
+    <input id="superSearch" type="text" placeholder="搜索大户…" value="${esc(superSearch)}" style="flex:1;min-width:160px">
+    <select id="superQuarter"><option value="2026-09-30">2026年三季报（2026-09-30）</option></select>
+  </div>`;
+  html += `<div class="seg" id="superFilter">${types.map((k) => `<button data-sfilter="${k}" class="${superFilter === k ? "active" : ""}">${k === "all" ? "全部" : esc(HOLDER_TYPE_LABEL[k])}</button>`).join("")}</div>`;
+  html += `<div id="superTableWrap"></div>`;
+  el.innerHTML = html;
+  const si = document.getElementById("superSearch");
+  if (si) si.addEventListener("input", () => { superSearch = si.value; superRenderTable(); });
+  const ft = document.getElementById("superFilter");
+  if (ft) ft.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-sfilter]");
+    if (!b) return;
+    superFilter = b.dataset.sfilter;
+    superRenderList();
+  });
+  superRenderTable();
+}
+
+function superRenderTable() {
+  const wrap = document.getElementById("superTableWrap");
+  if (!wrap) return;
+  const list = holdersCrossCache.investors || [];
+  const kw = superSearch.trim().toLowerCase();
+  const filtered = list.filter((x) => (superFilter === "all" || x.typeKey === superFilter) && (!kw || x.name.toLowerCase().indexOf(kw) >= 0));
+  let html = "";
   if (!filtered.length) {
-    html += `<p class="muted">该类型下无超级大户。</p>`;
+    html += `<p class="muted">该条件下无超级大户。</p>`;
   } else {
     html += `<table class="tbl"><tr><th>超级大户</th><th>类型</th><th>持仓只数</th><th>持仓股票（占该股流通股）</th><th>合计市值</th></tr>`;
     html += filtered.map((inv) => {
       const stocks = inv.positions.map((p) => `<a href="#" data-cross-stock="${p.code}">${esc(p.name)} ${p.ratio != null ? p.ratio.toFixed(2) + "%" : "—"}</a>`).join(" · ");
       return `<tr><td style="text-align:left"><a href="#" data-super-name="${esc(inv.name)}">${esc(inv.name)}</a></td><td><span class="badge htype-${inv.typeKey}">${esc(inv.typeLabel)}</span></td><td class="num">${inv.positions.length} 只</td><td style="text-align:left">${stocks}</td><td class="num">${inv.totalValue ? fmtMoney(inv.totalValue) : "—"}</td></tr>`;
     }).join("");
-    html += `</table><p class="muted" style="margin-top:6px">范围：12 只自选股（煤炭 ETF 无股东结构除外）2026 年三季报十大流通股东；合计市值 = 各股持股数 × 现价（东财实时行情），仅统计出现在前十的持仓，不是大户的全部持仓。</p>`;
+    html += `</table><p class="muted" style="margin-top:6px">范围：自选股（煤炭 ETF 无股东结构除外）2026 年三季报十大流通股东；合计市值 = 各股持股数 × 现价（东财实时行情），仅统计出现在前十的持仓，不是大户的全部持仓。</p>`;
   }
-  body.innerHTML = html;
-  const ft = document.getElementById("holdersCrossFilter");
-  if (ft) ft.addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-hcfilter]");
-    if (!b) return;
-    holdersCrossFilter = b.dataset.hcfilter;
-    holdersRenderCross();
-  });
-  body.querySelectorAll("[data-super-name]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); holdersOpenDetail(a.dataset.superName); }));
-  body.querySelectorAll("[data-cross-stock]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchToStock(a.dataset.crossStock); }));
+  wrap.innerHTML = html;
+  wrap.querySelectorAll("[data-super-name]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); holdersOpenDetail(a.dataset.superName); }));
+  wrap.querySelectorAll("[data-cross-stock]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchToStock(a.dataset.crossStock); }));
 }
 
 // ---------- 超级大户详情页 ----------
@@ -490,13 +682,16 @@ function holdersRenderCross() {
 // 职位（持仓表）/ 表现（复制组合 vs 沪深300）/ 投资组合结构（环形图 + 行业权重 + 季度堆叠）。
 // 段永平只是图版例子；A 股大户只列十大流通股东里实际出现的名字。
 async function holdersOpenDetail(name) {
-  const el = document.getElementById("holdersBody");
+  const el = document.getElementById("superHoldersBody");
+  if (!el) return;
+  const token = ++superRenderToken;
   el.innerHTML = `<div class="loading">正在加载 ${esc(name)} 的持仓…</div>`;
   await holdersBuildCross();
+  if (token !== superRenderToken) return; // 期间已返回列表或切了别的视图
   const inv = (holdersCrossCache.investors || []).find((x) => x.name === name);
   if (!inv || !inv.positions.length) {
-    el.innerHTML = `<p><button class="link-btn" id="holdersBackBtn">← 返回机构和超级大户</button></p><p class="muted" style="margin-top:10px">${esc(name)} 在 12 只自选股的十大流通股东中未出现（可能只在自选股之外的股票前十，或本期已退出前十）。本站只列持股事实，不补编。</p>`;
-    document.getElementById("holdersBackBtn").addEventListener("click", holdersBackToOverview);
+    el.innerHTML = `<p><button class="link-btn" id="holdersBackBtn">← 返回超级大户持仓</button></p><p class="muted" style="margin-top:10px">${esc(name)} 在自选股的十大流通股东中未出现（可能只在自选股之外的股票前十，或本期已退出前十）。本站只列持股事实，不补编。</p>`;
+    document.getElementById("holdersBackBtn").addEventListener("click", superBackToList);
     return;
   }
   const quarters = holdersInvestorQuarters(name);
@@ -508,11 +703,10 @@ async function holdersOpenDetail(name) {
   await holdersRenderDetail();
 }
 
-function holdersBackToOverview() {
+function superBackToList() {
   holdersDetail = null;
-  const snap = holdersCache[currentCode];
-  if (snap && !snap.empty) holdersRenderOverview(snap);
-  else renderHolders();
+  ++superRenderToken; // 中止进行中的详情加载
+  superRenderList();
 }
 
 // 该大户在各股快照里出现过的季度（并集，倒序取最新为默认）
@@ -556,7 +750,9 @@ function holdersInvestorPositions(name, quarter) {
 async function holdersRenderDetail() {
   const d = holdersDetail;
   if (!d) return;
-  const el = document.getElementById("holdersBody");
+  const token = superRenderToken;
+  const el = document.getElementById("superHoldersBody");
+  if (!el) return;
   const positions = holdersInvestorPositions(d.name, d.quarter);
   el.innerHTML = `<div class="loading">正在加载 ${esc(d.name)}（${esc(holdersQuarterLabel(d.quarter))}）的持仓与行情…</div>`;
   // 现价 + 行业（东财 ulist）与 5 年 K 线（表现复制用）并行拉取
@@ -587,6 +783,7 @@ async function holdersRenderDetail() {
   positions.sort((a, b) => (b.value || 0) - (a.value || 0));
   const top10Value = positions.slice(0, 10).reduce((s, p) => s + (p.value || 0), 0);
   const focus = totalValue > 0 ? top10Value / totalValue : null;
+  if (token !== superRenderToken) return; // 用户已返回列表或切了别的视图
   d.data = { positions, quotes, perf, totalValue, focus };
   holdersRenderDetailView();
 }
@@ -594,15 +791,16 @@ async function holdersRenderDetail() {
 function holdersRenderDetailView() {
   const d = holdersDetail;
   if (!d || !d.data) return;
-  const el = document.getElementById("holdersBody");
+  const el = document.getElementById("superHoldersBody");
+  if (!el) return;
   const { positions, totalValue, focus, perf } = d.data;
   const unchanged = positions.filter((p) => p.change === "不变").length;
   let html = "";
-  html += `<p><button class="link-btn" id="holdersBackBtn">← 返回机构和超级大户</button></p>`;
+  html += `<p><button class="link-btn" id="holdersBackBtn">← 返回超级大户持仓</button></p>`;
   html += `<h2 style="margin-top:6px">${esc(d.name)} <span class="badge htype-${d.typeKey}">${esc(d.typeLabel)}</span></h2>`;
   html += `<p class="muted">季度：<select id="holdersDetailQuarter" style="font-size:13px;padding:2px 6px">${d.quarters.map((qk) => `<option value="${qk}" ${qk === d.quarter ? "selected" : ""}>${esc(holdersQuarterLabel(qk))}</option>`).join("")}</select> <span class="muted">持仓为十大流通股东披露的季末时点数；季度选择器按股东数据实际披露的季度来，目前只有一期快照。</span></p>`;
   html += `<div class="metrics">`;
-  html += metricCard("职位", positions.length + " 只", "在 12 只自选股十大流通股东中的持仓数");
+  html += metricCard("职位", positions.length + " 只", "在自选股十大流通股东中的持仓数");
   html += metricCard("钱包尺寸", totalValue ? fmtMoney(totalValue) : "—", "持仓总市值（持股数 × 现价）");
   html += metricCard("专注", focus != null ? (focus * 100).toFixed(2) + "%" : "—", "前十仓位占组合比（≤10 只持仓时为 100%）");
   html += metricCard("新企业", "暂不可用", "仅一期快照，需两期以上才可算本季新进");
@@ -613,9 +811,9 @@ function holdersRenderDetailView() {
   html += `<button data-dtab="perf" class="${d.tab === "perf" ? "active" : ""}">表现</button>`;
   html += `<button data-dtab="structure" class="${d.tab === "structure" ? "active" : ""}">投资组合结构</button>`;
   html += `</div><div id="holdersDetailBody"></div>`;
-  html += `<p class="muted" style="margin-top:10px">口径：以下持仓仅为该大户在本站 12 只自选股中出现在十大流通股东的股票；其在自选股之外的持仓本站无数据。持仓数、占比、变动均来自东财 F10 股东研究快照（${esc(holdersQuarterLabel(d.quarter))}），现价为东财实时行情。</p>`;
+  html += `<p class="muted" style="margin-top:10px">口径：以下持仓仅为该大户在本站自选股中出现在十大流通股东的股票；其在自选股之外的持仓本站无数据。持仓数、占比、变动均来自东财 F10 股东研究快照（${esc(holdersQuarterLabel(d.quarter))}），现价为东财实时行情。</p>`;
   el.innerHTML = html;
-  document.getElementById("holdersBackBtn").addEventListener("click", holdersBackToOverview);
+  document.getElementById("holdersBackBtn").addEventListener("click", superBackToList);
   const qsel = document.getElementById("holdersDetailQuarter");
   if (qsel) qsel.addEventListener("change", () => { d.quarter = qsel.value; d.data = null; holdersRenderDetail(); });
   document.getElementById("holdersDetailTabs").addEventListener("click", (e) => {
@@ -648,6 +846,8 @@ function holdersRenderDetailPositions(body) {
   }).join("");
   html += `</table>`;
   html += `<p class="muted" style="margin-top:6px">合计市值 ${totalValue ? fmtMoney(totalValue) : "—"}；占组合 = 该股市值 / 组合总市值；1 年走势为该股近 1 年前复权收盘价小图（红涨绿跌）；较上季增减为东财原字段。</p>`;
+  html += `<h3 style="margin-top:14px">已卖出仓位</h3><p><span class="badge">暂不可用</span> <span class="muted">已卖出 = 上季在十大流通股东、本季已不在；仅一期快照（2026Q3），需下次披露后跑快照脚本累积两期才可列出。图版灰色行“销售”即此类仓位。</span></p>`;
+  html += `<div class="note-box"><b>如何解读这些数据。</b>所示持仓并非大户的全部持仓，而是该大户在本站自选股中出现在十大流通股东的股票（季末时点数）；其在自选股之外的持仓、季内买卖均不可见。占组合 = 该股市值 / 本站可见持仓总市值。1 年走势为前复权收盘价小图（红涨绿跌）。本信息仅供学习参考，不构成投资建议。</div>`;
   body.innerHTML = html;
   document.getElementById("holdersCsvBtn").addEventListener("click", () => holdersDownloadCSV(d));
   body.querySelectorAll("[data-dstock]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); switchToStock(a.dataset.dstock); }));
@@ -688,6 +888,16 @@ function holdersRenderDetailPerf(body) {
   }).join("")}</div>`;
   html += `<div class="chart-box"><canvas class="chart" id="holdersPerfChart"></canvas></div>`;
   html += `<p class="muted" id="holdersPerfNote"></p>`;
+  // 结论句（图版 image-21 的“五年后…”句式，A 股版：用最长可用窗口）
+  const hlOrder = ["5y", "3y", "1y", "q"];
+  let hlWin = null;
+  for (const k of hlOrder) { const w = perf.windows[k]; if (w && w.ok) { hlWin = w; break; } }
+  if (hlWin) {
+    const diff = (hlWin.retP - hlWin.retB) * 100;
+    html += `<p style="margin:10px 0">如果从 ${esc(hlWin.startDate)} 开始复制该大户的仓位持有至今，收益为 <b class="${chgClass(hlWin.retP * 100)}">${(hlWin.retP * 100).toFixed(1)}%</b>，而同期沪深300指数的收益为 <b class="${chgClass(hlWin.retB * 100)}">${(hlWin.retB * 100).toFixed(1)}%</b>。也就是说，前者比该指数${diff >= 0 ? "高出" : "低"} ${Math.abs(diff).toFixed(1)} 点。</p>`;
+  } else {
+    html += `<p class="muted">复制组合与沪深300的对比暂不可用：各窗口均无可对齐的 K 线数据。</p>`;
+  }
   // 分段对比条
   html += `<h3>它能跑赢沪深300指数吗？ <span class="muted" style="font-weight:400">（复制组合 vs 沪深300，百分点差）</span></h3><div id="holdersCmpBars"></div>`;
   // 如何管理
@@ -769,16 +979,19 @@ function holdersRenderDetailStructure(body) {
   }
   const indSegs = Object.entries(byInd).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, value: v, pct: totalValue > 0 ? (v / totalValue * 100).toFixed(1) + "%" : "—" }));
   html += `<h3>行业分布 <span class="muted" style="font-weight:400">（申万二级行业，按持仓市值）</span></h3>${holdersDonut(indSegs, indSegs.length + " 个行业", "按市值")}`;
-  // 行业权重现在 vs 前
+  // 行业权重现在 vs 上期（图版 image-22 的双条样式）
   html += `<h3>按行业划分的权重 <span class="muted" style="font-weight:400">（现在 vs 上期）</span></h3>`;
-  html += `<table class="tbl"><tr><th>行业</th><th>现在权重</th><th>上期权重</th><th>变化</th></tr>`;
-  html += indSegs.map((s) => `<tr><td style="text-align:left">${esc(s.label)}</td><td class="num">${s.pct}</td><td class="num">—</td><td class="num">—</td></tr>`).join("");
-  html += `</table><p class="muted" style="margin-top:6px">上期权重暂不可用：仅一期快照，需下次披露后跑快照脚本累积两期才可算行业权重变化。</p>`;
+  const maxW = Math.max.apply(null, indSegs.map((s) => parseFloat(s.pct)).concat([1]));
+  html += indSegs.map((s) => {
+    const wv = parseFloat(s.pct);
+    return `<div class="cmp-row"><span class="cmp-label" style="width:110px">${esc(s.label)}</span><span class="cmp-vals"><span class="cmp-line"><i>现在</i><span class="cmp-bar" style="width:${Math.max(wv / maxW * 100, 1.5).toFixed(1)}%;background:#2563eb"></span><b>${s.pct}</b></span><span class="cmp-line"><i>上期</i><span class="cmp-bar" style="width:1.5%;background:#94a3b8"></span><b>—</b></span></span><span class="cmp-diff muted">暂不可用</span></div>`;
+  }).join("");
+  html += `<p class="muted" style="margin-top:6px">上期权重暂不可用：仅一期快照，需下次披露后跑快照脚本累积两期才可算行业权重变化。</p>`;
   // 季度堆叠条形图
   html += `<h3>各行业权重季度变化</h3><p><span class="badge">暂不可用</span> <span class="muted">季度堆叠条形图需多期快照（图版为 23Q3–26Q2 共 8 个季度）；本站目前只有 ${esc(holdersQuarterLabel(d.quarter))}一期，待每季跑快照脚本累积后出现。</span></p>`;
   // 如何解读
   html += `<h3>如何解读这些数据</h3><ul class="muted" style="font-size:13px;line-height:1.8;padding-left:18px">
-    <li>持仓只统计该大户在本站 12 只自选股中出现在十大流通股东的股票；其余持仓本站无数据，环形图的分母是“本站可见持仓市值”，不是大户的全部资产。</li>
+    <li>持仓只统计该大户在本站自选股中出现在十大流通股东的股票；其余持仓本站无数据，环形图的分母是“本站可见持仓市值”，不是大户的全部资产。</li>
     <li>前十仓位占比高（如只有 1–2 只持仓时为 100%）说明在本站可见范围内集中，不代表大户整体集中。</li>
     <li>行业分布按申万二级行业（东财 f100 字段）归类；同一大户在不同股票的行业可能重叠，属正常现象。</li>
     <li>表现页的复制组合收益是模拟值：按季末持股数固定持有算出，未计季内买卖与前十之外的持仓，不能当作大户的真实收益率。</li>

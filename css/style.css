@@ -338,6 +338,12 @@ canvas.chart { width: 100%; height: 100%; display: block; }
 .badge.done { background: var(--green-soft); color: #047857; }
 .badge.soon { background: #fffbeb; color: var(--amber); }
 
+/* ---------- 机构持仓 / 超级大户持仓拆分（v9） ---------- */
+.note-box { background: var(--surface-2); border-left: 3px solid #f59e0b; border-radius: 6px; padding: 10px 14px; font-size: 13px; line-height: 1.7; margin: 10px 0; color: var(--ink); }
+.filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.filter-row input, .filter-row select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); font-size: 13px; }
+.tbl-wrap { overflow-x: auto; }
+
 /* ---------- 机构和超级大户（v6） ---------- */
 .badge.htype-shebao { background: #fef3c7; color: #92400e; }
 .badge.htype-qfii { background: #dbeafe; color: #1e40af; }

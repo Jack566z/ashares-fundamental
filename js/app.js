@@ -252,11 +252,10 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   if (btn.dataset.tab === "sector" && currentCode && sectorHistLoadedFor !== currentCode) renderSectorHist(currentCode);
   if (btn.dataset.tab === "winrate" && !winrateLoaded) { winrateLoaded = true; renderWinrate(); }
   if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
-  if (btn.dataset.tab === "holders" && currentCode) holdersEnsureCross();
   syncSidebarActive();
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
-const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300target: renderHs300Target, hs300ret: renderHs300Ret, mycharts: renderMycharts };
+const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300target: renderHs300Target, hs300ret: renderHs300Ret, instholders: renderInstHolders, superholders: renderSuperHolders, mycharts: renderMycharts };
 const toolLoaded = {};
 document.getElementById("toolTabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tool]");
@@ -467,7 +466,6 @@ async function loadStock(code) {
   renderKpi(data, m, ext);
   renderSegments(data);
   renderSeasonality(data);
-  renderHolders(data);
   renderTarget(data, m, ext);
   renderInvestor(data, m, ext);
   renderSmith(data, m, ext);
@@ -1336,9 +1334,12 @@ function renderSeasonality(data) {
   el.innerHTML = html;
 }
 
-// ---------- 机构和超级大户 ----------
-// 实现在 js/holders.js（renderHolders / holdersEnsureCross），数据为同源季度快照
+// ---------- 机构持仓 / 超级大户持仓 ----------
+// 实现在 js/holders.js（renderInstHolders / renderSuperHolders，工具级入口，
+// 经 TOOL_LOADERS 懒加载），数据为同源季度快照
 // data/holders/<code>.json（tools/refresh_holders.py 生成，源为东财 F10 PageAjax）。
+// v6 的个股标签已拆分：机构持仓 = 13F 式跨股表 + 个股详情；
+// 超级大户持仓 = 跨股大户汇总 + 大户详情三页（职位/表现/结构）。
 // 旧的“暂不可用”占位已删除：2026-11-09 实测 PageAjax curl 通但无 CORS，
 // 数据中心无股东表，快照是唯一能用的免费路径；快照缺失的股票仍在 holders.js 里诚实标注。
 
