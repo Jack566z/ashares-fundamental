@@ -159,44 +159,90 @@
       </div>
 
       <div id="detailArea" style="display:none">
-        <!-- 股票头 -->
-        <div class="card">
+        <!-- 股票头卡（AleInversor 仪表盘样式：logo + 名称 + 评分环 + 现价） -->
+        <div class="card ov-head-card">
           <div class="stock-head">
-            <div>
-              <div class="sh-name" id="shName">—</div>
+            <div class="sh-logo" id="shLogo">—</div>
+            <div class="sh-left">
+              <div class="sh-name-row">
+                <span class="sh-name" id="shName">—</span>
+                <button class="icon-btn sm" id="favBtn" title="加入自选 / 取消自选"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
+                <button class="icon-btn sm" id="headBellBtn" title="提醒"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></button>
+                <div class="bell-pop" id="headBellPop" style="display:none">提醒功能尚未接入本站</div>
+              </div>
               <div class="sh-code" id="shCode">—</div>
               <div class="sh-meta" id="shMeta">—</div>
               <div class="sh-tags" id="shTags"></div>
             </div>
-            <div class="sh-price">
-              <div class="p" id="shPrice">—</div>
-              <div class="c" id="shChange">—</div>
-              <div class="small" id="shSub">—</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 综合评分 -->
-        <div class="card">
-          <h2>📊 综合评分 <span class="muted" style="font-weight:400">/ 100 · 六维打分，规则见“打分指南”</span></h2>
-          <div class="score-wrap">
-            <div class="score-total">
-              <div class="score-ring" id="scoreRing">
-                <div class="num" id="scoreNum">—</div>
-                <div class="den" id="scoreDen">/ 100</div>
+            <div class="sh-right">
+              <div class="score-ring-svg" id="scoreRing">
+                <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">
+                  <circle cx="60" cy="60" r="52" fill="none" stroke="var(--surface-3)" stroke-width="9"/>
+                  <circle id="scoreRingArc" cx="60" cy="60" r="52" fill="none" stroke="#1a9e54" stroke-width="9" stroke-linecap="round" transform="rotate(-90 60 60)" stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+                </svg>
+                <div class="ring-center"><div class="num" id="scoreNum">—</div><div class="den" id="scoreDen">/ 100</div></div>
               </div>
-              <div class="score-grade" id="scoreGrade">—</div>
-              <div class="small" id="scoreNote"></div>
+              <div class="sh-price-col">
+                <div class="sh-price">
+                  <div class="p" id="shPrice">—</div>
+                  <div class="c" id="shChange">—</div>
+                  <div class="small" id="shSub">—</div>
+                  <div class="small" id="shMcap">—</div>
+                </div>
+                <div class="score-grade" id="scoreGrade">—</div>
+                <div class="small" id="scoreNote"></div>
+              </div>
             </div>
-            <div class="score-dims" id="scoreDims"></div>
           </div>
-          <div class="score-note" id="scoreWarn" style="display:none"></div>
         </div>
 
-        <!-- 关键指标 -->
-        <div class="card">
-          <h2>📌 关键指标 <span class="muted" style="font-weight:400" id="metricsBasis"></span></h2>
-          <div class="metrics" id="metricsGrid"></div>
+        <!-- 六维评分 chips + 生成 PDF 摘要 -->
+        <div class="ov-chips-row">
+          <div class="ov-chips" id="ovChips"></div>
+          <button class="pdf-btn" id="pdfBtn">📄 生成 PDF 摘要</button>
+        </div>
+
+        <!-- 价格走势 + 关键数据 -->
+        <div class="ov-grid-2">
+          <div class="card ov-chart-card no-print">
+            <div class="ov-card-head">
+              <h2>📈 价格与指数图表</h2>
+              <div class="seg" id="ovChartSeg">
+                <button data-ovp="60">3个月</button>
+                <button data-ovp="120">6个月</button>
+                <button data-ovp="250" class="active">1年</button>
+              </div>
+            </div>
+            <div class="chart-box"><canvas class="chart" id="ovChart"></canvas></div>
+            <p class="muted" id="ovChartNote">前复权 K 线 · 红涨绿跌 · 仅本股走势，指数叠加暂未接入</p>
+          </div>
+          <div class="card ov-metrics-card">
+            <h2>📌 关键数据 <span class="muted" style="font-weight:400" id="metricsBasis"></span></h2>
+            <div class="metrics" id="metricsGrid"></div>
+          </div>
+        </div>
+
+        <!-- 52周区间 -->
+        <div class="card ov-range52-card no-print">
+          <h2>📍 52周区间</h2>
+          <div id="ovRange52"></div>
+        </div>
+
+        <!-- 全球评分 + 人工智能分析 -->
+        <div class="ov-grid-2">
+          <div class="card ov-breakdown-card no-print">
+            <h2>🌟 全球评分 <span class="muted" style="font-weight:400" id="ovBreakdownSub"></span></h2>
+            <div class="score-dims" id="scoreDims"></div>
+            <div class="score-note" id="scoreWarn" style="display:none"></div>
+          </div>
+          <div class="card ov-ai-card no-print">
+            <h2>🔍 人工智能分析</h2>
+            <p class="ai-sub">另一种观点</p>
+            <p>投资股票时，很容易忽略一些重要信息。AI 分析会分析基本面、宏观经济环境以及最新的财报电话会议，从而揭示那些被分析所遗漏的投资机会。</p>
+            <p><b>AI 分析尚未接入本站。</b>本站是纯静态站，无 AI 后端，无法生成分析内容。</p>
+            <button class="primary" id="aiBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">🧠 请求人工智能分析</button>
+            <p class="small" id="aiNote" style="display:none;margin-top:10px">AI 分析尚未接入本站——本站无 AI 后端，无法生成分析内容。</p>
+          </div>
         </div>
 
         <!-- 标签页（对照 AleInversor v4.39 的 13 个主模块 + 日历/行业/周期性） -->

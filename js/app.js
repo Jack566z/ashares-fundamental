@@ -340,6 +340,39 @@ document.addEventListener("click", (e) => {
     if (pop) pop.style.display = "none";
   }
 });
+// 概况仪表盘：收藏心形（切换自选）、头卡铃铛、AI 说明、PDF 打印、走势图周期
+document.getElementById("favBtn").addEventListener("click", () => {
+  const code = currentCode;
+  if (!code || !currentData) return;
+  const name = (currentData.quote && currentData.quote.name) || (currentData.tx && currentData.tx.name) || code;
+  if (watchlist.some((s) => s.code === code)) watchlist = watchlist.filter((s) => s.code !== code);
+  else watchlist.unshift({ code, name });
+  saveWatchlist(watchlist);
+  renderWatchlist();
+  renderHead(currentData, currentMetrics);
+});
+document.getElementById("headBellBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById("headBellPop");
+  pop.style.display = pop.style.display === "block" ? "none" : "block";
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest || (!e.target.closest("#headBellBtn") && !e.target.closest("#headBellPop"))) {
+    const pop = document.getElementById("headBellPop");
+    if (pop) pop.style.display = "none";
+  }
+});
+document.getElementById("aiBtn").addEventListener("click", () => {
+  document.getElementById("aiNote").style.display = "block";
+});
+document.getElementById("pdfBtn").addEventListener("click", () => window.print());
+document.getElementById("ovChartSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest ? e.target.closest("button") : null;
+  if (!btn || !btn.dataset.ovp) return;
+  ovChartPeriod = parseInt(btn.dataset.ovp, 10) || 250;
+  document.querySelectorAll("#ovChartSeg button").forEach((b) => b.classList.toggle("active", b === btn));
+  drawOverviewChart();
+});
 document.getElementById("hamburgerBtn").addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
 document.getElementById("sidebarBackdrop").addEventListener("click", closeSidebarMobile);
 // 右侧顶栏“分析”按钮：6 位代码直达；否则取第一条联想结果，联想未出时现查
@@ -406,6 +439,9 @@ async function loadStock(code) {
   renderHead(data, m);
   renderScore(data, m);
   renderMetrics(m);
+  renderChips(data, m);
+  renderRange52(data, m);
+  drawOverviewChart();
   renderOverview(data, m, ext);
   renderValuation(data, m, ext);
   renderDCF();
@@ -450,10 +486,21 @@ async function loadStock(code) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// ---------- 52 周区间：与技术维度同口径，取近 250 根日 K 的最高/最低（不足 250 根取全部；不足 60 根视为不可用） ----------
+function range52(data) {
+  const kl = data && data.klineD;
+  if (!kl || kl.length < 60) return null;
+  const w = kl.slice(-250);
+  return { high: Math.max(...w.map((k) => k.high)), low: Math.min(...w.map((k) => k.low)), n: w.length };
+}
+
 // ---------- 渲染：头部 ----------
 function renderHead(data, m) {
   const q = data.quote || {};
   const name = q.name || (data.tx && data.tx.name) || currentCode;
+  document.getElementById("shLogo").textContent = String(name).replace(/^\s+/, "").slice(0, 1) || "—";
+  const favBtn = document.getElementById("favBtn");
+  if (favBtn) favBtn.classList.toggle("on", watchlist.some((s) => s.code === currentCode));
   document.getElementById("shName").textContent = name;
   document.getElementById("shCode").textContent = currentCode + (watchlist.some((s) => s.code === currentCode) ? " · 已在自选" : "");
   const price = m.price;
@@ -476,27 +523,35 @@ function renderHead(data, m) {
   const tags = [];
   if (m.concepts) tags.push(...String(m.concepts).split(";").filter(Boolean).slice(0, 8));
   document.getElementById("shTags").innerHTML = tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+  const r52 = range52(data);
+  document.getElementById("shMcap").textContent =
+    "总市值 " + fmtMoney(m.totalMcap) + "  ·  52周区间 " + (r52 ? r52.low.toFixed(2) + " – " + r52.high.toFixed(2) : "暂不可用");
 }
 
 // ---------- 渲染：评分 ----------
 function renderScore(data, m) {
   const res = scoreStock(m, data.klineD);
-  const ring = document.getElementById("scoreRing");
   const pct = res.totalMax ? res.total / res.totalMax : 0;
   const col = pct >= 0.8 ? "#1a9e54" : pct >= 0.65 ? "#2b6cb0" : pct >= 0.5 ? "#b45309" : "#e5484d";
-  ring.style.borderColor = col;
-  ring.style.color = col;
-  document.getElementById("scoreNum").textContent = res.total;
+  // 头卡 SVG 评分环：圆周 2π×52 ≈ 326.73，按占比显示弧长
+  const arc = document.getElementById("scoreRingArc");
+  if (arc) { arc.style.stroke = col; arc.style.strokeDashoffset = (326.73 * (1 - pct)).toFixed(1); }
+  const numEl = document.getElementById("scoreNum");
+  numEl.textContent = res.total;
+  numEl.style.color = col;
   document.getElementById("scoreDen").textContent = "/ " + res.totalMax + (res.partial ? "（部分）" : "");
   document.getElementById("scoreGrade").textContent = "评级：" + res.grade;
   document.getElementById("scoreNote").textContent = res.partial ? "该标的无财报数据，只计估值 + 技术" : "";
+  const bdSub = document.getElementById("ovBreakdownSub");
+  if (bdSub) bdSub.textContent = res.total + " / " + res.totalMax + " · 评级：" + res.grade + " · 基于六大分析支柱";
   const labels = { valuation: "估值", profitability: "盈利", debt: "负债", growth: "成长", dividend: "分红", technical: "技术" };
   document.getElementById("scoreDims").innerHTML = Object.keys(labels).map((k) => {
     const d = res.dims[k];
     const w = d.max ? Math.round(d.score / d.max * 100) : 0;
+    const dc = d.na ? "#e5e7eb" : (w >= 80 ? "#1a9e54" : w >= 65 ? "#2b6cb0" : w >= 50 ? "#b45309" : "#e5484d");
     return `<div class="dim-row">
-      <div class="dim-top"><b>${labels[k]}</b><span>${d.na ? "不适用" : d.score + " / " + d.max}</span></div>
-      <div class="dim-bar"><i style="width:${d.na ? 0 : w}%;background:${d.na ? "#e5e7eb" : col}"></i></div>
+      <div class="dim-top"><b>${labels[k]}</b><span style="color:${dc}">${d.na ? "不适用" : d.score + " / " + d.max}</span></div>
+      <div class="dim-bar"><i style="width:${d.na ? 0 : w}%;background:${dc}"></i></div>
       <div class="dim-detail">${esc(d.detail)}</div>
     </div>`;
   }).join("");
@@ -506,6 +561,62 @@ function renderScore(data, m) {
     warn.style.display = "block";
     warn.textContent = "注意：部分财报接口本次未返回数据（" + missing.map(([k]) => k).join("、") + "），对应维度可能偏低；刷新页面可重试。";
   } else warn.style.display = "none";
+}
+
+// ---------- 概况仪表盘：六维 chips ----------
+// 文字评价口径：维度得分占比 ≥80% 出色地，≥50% 可以接受，否则待改善；与评分档位（优秀≥80、良好≥65、一般≥50）同向
+function dimVerdict(pct) { return pct >= 0.8 ? "出色地" : pct >= 0.5 ? "可以接受" : "待改善"; }
+function renderChips(data, m) {
+  const res = scoreStock(m, data.klineD);
+  const labels = { valuation: "估值", profitability: "盈利", debt: "负债", growth: "成长", dividend: "分红", technical: "技术" };
+  const chip = (name, num, raw, pct, verdict, na) => {
+    const cls = na ? "na" : (verdict === "出色地" ? "good" : verdict === "可以接受" ? "ok" : "weak");
+    return `<div class="dim-chip ${cls}">
+      <div class="dc-top"><span class="dc-dot"></span><span class="dc-name">${esc(name)}</span></div>
+      <div class="dc-num">${na ? "—" : num}</div>
+      <div class="dc-verdict">${na ? "不适用" : verdict}</div>
+      <div class="dc-bar"><i style="width:${na ? 0 : Math.round(pct * 100)}%"></i></div>
+      <div class="dc-raw">${esc(raw)}</div>
+    </div>`;
+  };
+  const chips = Object.keys(labels).map((k) => {
+    const d = res.dims[k];
+    if (d.na) return chip(labels[k], null, "该标的无财报数据", 0, "", true);
+    const pct = d.max ? d.score / d.max : 0;
+    return chip(labels[k], Math.round(pct * 100), d.score + " / " + d.max, pct, dimVerdict(pct), false);
+  }).join("");
+  const totalPct = res.totalMax ? res.total / res.totalMax : 0;
+  const total = chip("全部的", res.total, res.total + " / " + res.totalMax, totalPct, dimVerdict(totalPct), false);
+  document.getElementById("ovChips").innerHTML = chips + total;
+}
+
+// ---------- 概况仪表盘：52 周区间条 ----------
+function renderRange52(data, m) {
+  const el = document.getElementById("ovRange52");
+  const r52 = range52(data);
+  const price = m.price;
+  if (!r52 || price == null || !(r52.high > r52.low)) {
+    el.innerHTML = `<p class="muted">52周区间暂不可用 — K 线不足 60 根，或当日无收盘价。</p>`;
+    return;
+  }
+  const pos = Math.max(0, Math.min(1, (price - r52.low) / (r52.high - r52.low)));
+  const posPct = Math.round(pos * 100);
+  const near = pos <= 0.33 ? "接近低点" : pos >= 0.67 ? "接近高点" : "区间中部";
+  const nearCls = pos <= 0.33 ? "low" : pos >= 0.67 ? "high" : "mid";
+  el.innerHTML = `
+    <div class="r52-top"><span>📍 范围 52 周</span><span class="r52-near ${nearCls}">${near} · ${posPct}%</span></div>
+    <div class="r52-track"><b style="width:${(pos * 100).toFixed(1)}%"></b><i style="left:${(pos * 100).toFixed(1)}%"></i></div>
+    <div class="r52-labels"><span>最低：${r52.low.toFixed(2)} 元</span><span>当前价格：<b class="${chgClass(m.changePct)}">${price.toFixed(2)} 元</b></span><span>最高：${r52.high.toFixed(2)} 元</span></div>
+    <p class="muted" style="margin-top:6px">基于近 ${r52.n} 个交易日 K 线最高/最低（与技术维度的 52 周高低同口径）。</p>`;
+}
+
+// ---------- 概况仪表盘：价格走势图 ----------
+let ovChartPeriod = 250;
+function drawOverviewChart() {
+  const canvas = document.getElementById("ovChart");
+  const kl = currentData && currentData.klineD;
+  if (!canvas || !kl || !kl.length) return;
+  drawKline(canvas, kl, { limit: ovChartPeriod });
 }
 
 // ---------- 渲染：关键指标 ----------

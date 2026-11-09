@@ -3,6 +3,7 @@
   --up: #e5484d; --down: #1a9e54;
   --ink: #1f2937; --muted: #6b7280; --faint: #9ca3af;
   --line: #e5e7eb; --bg: #f4f6f8; --card: #ffffff;
+  --card-border: 1.5px solid rgba(35, 34, 31, 0.75);
   --blue: #2563eb; --blue-soft: #eff6ff;
   --amber: #b45309; --green-soft: #ecfdf5; --red-soft: #fef2f2;
   --radius: 10px;
@@ -14,6 +15,7 @@
 html[data-theme="dark"] {
   --ink: #e2e8f0; --muted: #94a3b8; --faint: #64748b;
   --line: #334155; --bg: #0f172a; --card: #1e293b;
+  --card-border: 1.5px solid rgba(203, 213, 225, 0.45);
   --blue-soft: #172554; --green-soft: #052e16; --red-soft: #450a0a;
   --nav-bg: #0f172a; --nav-hover: #1e293b; --nav-active-bg: #172554;
   --surface-2: #1e293b; --surface-3: #243449; --input-bg: #1e293b;
@@ -182,7 +184,7 @@ main.content { flex: 1; min-width: 0; width: 100%; max-width: 1200px; margin: 0 
 /* ---------- 隐藏的旧横向标签栏（导航已移到左侧栏，DOM 保留供 JS 复用） ---------- */
 #tabs, #toolTabs { display: none; }
 .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); border: var(--card-border); border-radius: 16px;
   padding: 16px 18px; margin-bottom: 16px;
 }
 .card h2 { font-size: 16px; margin-bottom: 10px; }
@@ -235,16 +237,15 @@ main.content { flex: 1; min-width: 0; width: 100%; max-width: 1200px; margin: 0 
 }
 
 /* ---------- 评分 ---------- */
-.score-wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
-.score-total { text-align: center; min-width: 150px; }
-.score-ring {
-  width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 8px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border: 8px solid var(--line); font-weight: 700;
+.score-ring-svg { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
+.score-ring-svg svg { display: block; }
+.score-ring-svg .ring-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; pointer-events: none;
 }
-.score-ring .num { font-size: 34px; line-height: 1; }
-.score-ring .den { font-size: 13px; color: var(--muted); }
-.score-grade { font-size: 15px; font-weight: 700; }
+.score-ring-svg .ring-center .num { font-size: 34px; font-weight: 700; line-height: 1; }
+.score-ring-svg .ring-center .den { font-size: 13px; color: var(--muted); }
+.score-grade { font-size: 15px; font-weight: 700; margin-top: 6px; }
 .score-dims { flex: 1; min-width: 280px; }
 .dim-row { margin-bottom: 10px; }
 .dim-row .dim-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
@@ -367,4 +368,83 @@ footer.site {
   .user-name, #marketClock { display: none; }
   .stock-head .sh-price { margin-left: 0; text-align: left; }
   main.content { padding: 12px 12px 8px; }
+}
+
+/* ---------- 概况仪表盘（AleInversor 仪表盘样式） ---------- */
+.ov-head-card .stock-head { align-items: center; }
+.sh-logo {
+  width: 56px; height: 56px; border-radius: 12px; flex-shrink: 0;
+  background: linear-gradient(135deg, #2563eb, #1e40af); color: #fff;
+  font-size: 28px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
+.sh-left { flex: 1; min-width: 220px; }
+.sh-name-row { display: flex; align-items: center; gap: 6px; position: relative; }
+.icon-btn.sm { width: 28px; height: 28px; }
+.icon-btn.sm svg { width: 17px; height: 17px; }
+#favBtn.on svg { fill: #e5484d; color: #e5484d; }
+#headBellPop { top: 34px; left: 0; right: auto; }
+.sh-right { display: flex; align-items: center; gap: 18px; margin-left: auto; }
+.sh-right .sh-price { margin-left: 0; }
+.sh-price-col { text-align: right; min-width: 180px; }
+.sh-price-col .score-grade { margin-top: 4px; }
+
+/* 六维 chips + PDF 按钮 */
+.ov-chips-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 16px; }
+.ov-chips { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; min-width: 0; }
+.dim-chip { background: var(--card); border: var(--card-border); border-radius: 12px; padding: 10px 12px; }
+.dim-chip .dc-top { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.dc-dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex-shrink: 0; }
+.dim-chip.good .dc-dot { background: #1a9e54; }
+.dim-chip.ok .dc-dot { background: #d97706; }
+.dim-chip.weak .dc-dot { background: #e5484d; }
+.dim-chip .dc-num { font-size: 24px; font-weight: 700; line-height: 1.2; margin-top: 4px; }
+.dim-chip.good .dc-num, .dim-chip.good .dc-verdict { color: #1a9e54; }
+.dim-chip.ok .dc-num, .dim-chip.ok .dc-verdict { color: #b45309; }
+.dim-chip.weak .dc-num, .dim-chip.weak .dc-verdict { color: #e5484d; }
+.dim-chip .dc-verdict { font-size: 12px; font-weight: 600; }
+.dim-chip .dc-bar { height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.dim-chip .dc-bar i { display: block; height: 100%; border-radius: 3px; background: var(--blue); }
+.dim-chip.good .dc-bar i { background: #1a9e54; }
+.dim-chip.ok .dc-bar i { background: #d97706; }
+.dim-chip.weak .dc-bar i { background: #e5484d; }
+.dim-chip .dc-raw { font-size: 11px; color: var(--faint); margin-top: 4px; }
+.pdf-btn {
+  flex-shrink: 0; align-self: center; padding: 11px 18px; border: none; border-radius: 10px;
+  background: #f59e0b; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap;
+}
+.pdf-btn:hover { background: #d97706; }
+
+/* 双栏：图表 + 关键数据 / 全球评分 + AI 分析 */
+.ov-grid-2 { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; }
+.ov-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.ov-card-head h2 { margin-bottom: 0; }
+
+/* 52周区间条 */
+.r52-top { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.r52-near.low { color: #1a9e54; }
+.r52-near.high { color: #e5484d; }
+.r52-near.mid { color: var(--muted); }
+.r52-track { position: relative; height: 10px; background: var(--surface-3); border-radius: 5px; }
+.r52-track b { display: block; height: 100%; background: #1a9e54; border-radius: 5px 0 0 5px; }
+.r52-track i { position: absolute; top: 50%; width: 4px; height: 18px; background: var(--ink); border-radius: 2px; transform: translate(-50%, -50%); }
+.r52-labels { display: flex; justify-content: space-between; font-size: 13px; margin-top: 8px; flex-wrap: wrap; gap: 6px; }
+
+/* AI 分析卡 */
+.ov-ai-card .ai-sub { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.ov-ai-card p { margin-bottom: 10px; }
+
+@media (max-width: 900px) {
+  .ov-grid-2 { grid-template-columns: 1fr; }
+  .ov-chips { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .ov-chips-row { flex-wrap: wrap; }
+  .sh-right { margin-left: 0; flex-wrap: wrap; }
+}
+
+/* ---------- 打印：只输出摘要页（头卡 + 六维 + 关键数据） ---------- */
+@media print {
+  .nav-sidebar, .main-topbar, #tabs, #toolTabs, .tab-pane, .no-print, .pdf-btn, #sidebarBackdrop, .hamburger { display: none !important; }
+  body { background: #fff; }
+  main.content { max-width: none; padding: 0; }
+  .card, .dim-chip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .ov-chips-row { margin-bottom: 12px; }
 }
