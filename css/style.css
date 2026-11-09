@@ -699,3 +699,30 @@ html[data-theme="dark"] .cal-empty { border-color: #1e40af; color: #bfdbfe; }
   .cal-evt, .cal-more { display: none; }
   .cal-cell.has-evt .d::after { content: " •"; color: var(--blue); }
 }
+
+/* ---------- 我的图形 v12 ---------- */
+.mc-empty { border: 1.5px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.mc-saved-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.mc-saved-row:last-child { border-bottom: none; }
+.mc-saved-name { font-weight: 700; color: var(--blue); text-decoration: none; }
+.mc-saved-name:hover { text-decoration: underline; }
+.mc-del { color: var(--red, #e5484d); font-size: 13px; text-decoration: none; white-space: nowrap; }
+.mc-form { margin-top: 16px; }
+.mc-field { display: block; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.mc-field input { display: block; width: 100%; max-width: 420px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 14px; }
+.mc-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.mc-label { font-size: 14px; font-weight: 600; min-width: 64px; }
+.mc-row input[type="text"] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 13px; width: 180px; }
+.mc-row select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 13px; }
+.mc-metric-panel { border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 12px; max-height: 260px; overflow-y: auto; }
+.mc-metric-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.mc-metric-row:last-child { border-bottom: none; }
+.mc-metric-row.disabled { opacity: .55; cursor: not-allowed; }
+.mc-metric-label { font-weight: 700; min-width: 92px; }
+.mc-metric-desc { color: var(--muted); flex: 1; }
+.mc-metric-na { color: var(--amber, #b45309); font-size: 12px; }
+.mc-selected { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.mc-chip { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid; border-radius: 999px; padding: 3px 8px; font-size: 13px; background: var(--card); }
+.mc-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.mc-chip a { color: var(--muted); text-decoration: none; font-weight: 700; }
+.mc-check { font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }

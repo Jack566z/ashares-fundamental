@@ -573,7 +573,7 @@ function renderScore(data, m) {
 // ---------- 概况仪表盘：六维 chips ----------
 // 文字评价口径：维度得分占比 ≥80% 出色地，≥50% 可以接受，否则待改善；与评分档位（优秀≥80、良好≥65、一般≥50）同向
 function dimVerdict(pct) { return pct >= 0.8 ? "出色地" : pct >= 0.5 ? "可以接受" : "待改善"; }
-function renderChips(data, m) {
+function buildChipsHtml(data, m) {
   const res = scoreStock(m, data.klineD);
   const labels = { valuation: "估值", profitability: "盈利", debt: "负债", growth: "成长", dividend: "分红", technical: "技术" };
   const chip = (name, num, raw, pct, verdict, na) => {
@@ -594,7 +594,12 @@ function renderChips(data, m) {
   }).join("");
   const totalPct = res.totalMax ? res.total / res.totalMax : 0;
   const total = chip("全部的", res.total, res.total + " / " + res.totalMax, totalPct, dimVerdict(totalPct), false);
-  document.getElementById("ovChips").innerHTML = chips + total;
+  return chips + total;
+}
+// 概况与我的图形共用：v5 的六维 chips 只算一次 HTML，两处复用
+function renderChips(data, m) {
+  const el = document.getElementById("ovChips");
+  if (el) el.innerHTML = buildChipsHtml(data, m);
 }
 
 // ---------- 概况仪表盘：52 周区间条 ----------
@@ -2256,66 +2261,9 @@ async function renderCompare() {
 }
 
 // ---------- 我的图形 ----------
-const LS_CHARTS = "af_mycharts";
-function loadMyCharts() {
-  try {
-    const raw = localStorage.getItem(LS_CHARTS);
-    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
-  } catch (e) { /* 忽略 */ }
-  return [];
-}
-function saveMyCharts(list) { localStorage.setItem(LS_CHARTS, JSON.stringify(list)); }
-function kltLabel(klt) { return klt === 102 ? "周K" : klt === 103 ? "月K" : "日K"; }
-function saveCurrentChart() {
-  if (!currentData || !currentCode) return;
-  const btn = document.getElementById("saveChartBtn");
-  const name = (currentData.quote && currentData.quote.name) || (currentData.tx && currentData.tx.name) || currentCode;
-  const today = new Date().toLocaleDateString("zh-CN");
-  let label = "";
-  try { label = window.prompt("给这个图形起个名字：", name + " " + currentCode + " " + kltLabel(currentKlt) + " " + today) || ""; } catch (e) { label = ""; }
-  if (!label) return;
-  const list = loadMyCharts();
-  list.unshift({
-    id: "c" + Date.now(),
-    name: label, code: currentCode, klt: currentKlt,
-    date: today,
-    price: currentMetrics && currentMetrics.price != null ? currentMetrics.price : null,
-    changePct: currentMetrics ? currentMetrics.changePct : null,
-  });
-  saveMyCharts(list);
-  if (btn) { const old = btn.textContent; btn.textContent = "✓ 已保存"; setTimeout(() => { btn.textContent = old; }, 1500); }
-  if (toolLoaded.mycharts) renderMycharts();
-}
-function renderMycharts() {
-  const el = document.getElementById("mychartsBody");
-  const list = loadMyCharts();
-  if (!list.length) {
-    el.innerHTML = `<p class="muted">还没有保存的图形。在任意股票的“技术”页点“💾 保存当前图形到‘我的图形’”，可把当前 K 线视图（代码 + 日/周/月周期 + 保存时价格）存下来，之后一点即达。</p>`;
-    return;
-  }
-  el.innerHTML = `<table class="tbl"><tr><th>名称</th><th>代码</th><th>周期</th><th>保存时价格</th><th>保存日期</th><th>操作</th></tr>` +
-    list.map((c) => `<tr><td style="text-align:left">${esc(c.name)}</td><td>${esc(c.code)}</td><td>${esc(kltLabel(c.klt))}</td><td class="num">${c.price != null ? c.price.toFixed(2) : "—"}${c.changePct != null ? "（" + chgText(c.changePct) + "）" : ""}</td><td>${esc(c.date || "")}</td>
-      <td><a href="#" data-open-chart="${esc(c.id)}">打开</a> · <a href="#" data-del-chart="${esc(c.id)}">删除</a></td></tr>`).join("") + `</table>`;
-  el.querySelectorAll("[data-open-chart]").forEach((a) => a.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    const c = loadMyCharts().find((x) => x.id === a.dataset.openChart);
-    if (!c) return;
-    currentKlt = c.klt || 101;
-    document.querySelectorAll("#klineSeg button").forEach((b) => b.classList.toggle("active", parseInt(b.dataset.klt, 10) === currentKlt));
-    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === "tech"));
-    document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === "pane-tech"));
-    document.getElementById("toolArea").style.display = "none";
-    document.getElementById("detailArea").style.display = "block";
-    document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
-    loadStock(c.code);
-  }));
-  el.querySelectorAll("[data-del-chart]").forEach((a) => a.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    saveMyCharts(loadMyCharts().filter((x) => x.id !== a.dataset.delChart));
-    renderMycharts();
-  }));
-}
-
+// v12：实现已移到 js/mycharts.js（构建器 + 指标序列 + 双轴画图），
+// 存储键仍是 af_mycharts，v2 的 K 线快照旧数据照常读出。
+// renderMycharts / loadMyCharts / saveMyCharts / saveCurrentChart 均在该文件定义。
 // ---------- 时钟 ----------
 function tickClock() {
   const el = document.getElementById("marketClock");
