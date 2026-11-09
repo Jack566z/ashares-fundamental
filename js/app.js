@@ -2034,45 +2034,8 @@ function drawHeatmapTreemap(data, idx, per) {
   el.querySelectorAll(".hm-tile").forEach((t) => t.addEventListener("click", () => switchToStock(t.dataset.code)));
 }
 
-// ---------- 低估雷达 ----------
-async function renderRadar() {
-  const el = document.getElementById("radarBody");
-  el.innerHTML = `<div class="loading">正在全市场扫描低估股…</div>`;
-  try {
-    const all = await fetchMarketScan(500);
-    const cands = all.filter((s) =>
-      s.pe != null && s.pe >= 3 && s.pe <= 15 &&
-      s.pb != null && s.pb >= 0.5 && s.pb <= 2.5 &&
-      s.totalMcap != null && s.totalMcap >= 5e9 &&
-      s.name && !/退|ST|PT/.test(s.name)
-    ).slice(0, 30);
-    if (!cands.length) throw new Error("按规则筛出 0 只（PE（静态）3–15、PB 0.5–2.5、市值>50 亿）");
-    const quotes = await fetchTxQuotes(cands.map((s) => s.code));
-    const scored = cands.map((s) => {
-      const q = quotes[s.code] || {};
-      const roe = q.roe != null ? q.roe : null; // 腾讯 qt 字段 65 = ROE（%）
-      const peS = Math.max(0, Math.min(100, (15 - s.pe) / 12 * 100));
-      const pbS = Math.max(0, Math.min(100, (2.5 - s.pb) / 2 * 100));
-      const roeS = roe != null ? Math.max(0, Math.min(100, roe / 20 * 100)) : 50;
-      const score = Math.round(peS * 0.4 + pbS * 0.3 + roeS * 0.3);
-      return { ...s, roe, score };
-    }).sort((a, b) => b.score - a.score);
-    let html = `<p class="muted" style="margin-bottom:10px">规则：PE（静态，东财 clist f9 口径）3–15 倍 · PB 0.5–2.5 倍 · 总市值 &gt; 50 亿 · 剔除退市/ST 股 · 评分 = PE 越低越好（40%）+ PB 越低越好（30%）+ ROE 越高越好（30%，腾讯行情 ROE）。扫描范围：东财全市场按 PE 升序取前 500 只（全市场共 5563 只，PE 排序靠后的不在本次扫描内）。</p>`;
-    html += `<table class="tbl"><tr><th>#</th><th>代码</th><th>名称</th><th>现价</th><th>涨跌</th><th>PE（静态）</th><th>PB</th><th>总市值</th><th>ROE</th><th>雷达评分</th></tr>`;
-    scored.forEach((s, i) => {
-      html += `<tr><td>${i + 1}</td><td><a href="#" data-radar-code="${esc(s.code)}">${esc(s.code)}</a></td><td style="text-align:left">${esc(s.name)}</td><td class="num">${s.price != null ? s.price.toFixed(2) : "—"}</td><td class="num ${chgClass(s.changePct)}">${chgText(s.changePct)}</td><td class="num">${s.pe.toFixed(2)}</td><td class="num">${s.pb.toFixed(2)}</td><td class="num">${fmtMoney(s.totalMcap)}</td><td class="num">${s.roe != null ? s.roe.toFixed(1) + "%" : "—"}</td><td class="num"><b>${s.score}</b></td></tr>`;
-    });
-    html += `</table><p class="muted" style="margin-top:8px">点击代码可直接分析该股。雷达评分是筛选排序分，不是买入建议；低 PE/PB 可能是价值陷阱，请结合财报与分红页交叉验证。</p>`;
-    el.innerHTML = html;
-    el.querySelectorAll("[data-radar-code]").forEach((a) => a.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      switchToStock(a.dataset.radarCode);
-    }));
-  } catch (e) {
-    el.innerHTML = `<p class="muted">低估雷达暂不可用（${esc(e.message || e)}）。<a href="#" id="radarRetry">重试</a></p>`;
-    document.getElementById("radarRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderRadar(); });
-  }
-}
+// ---------- 低估雷达 v10 ----------
+// 实现已移至 js/radar.js（评估差距 + 股息雷达）；TOOL_LOADERS 仍引用全局 renderRadar。
 
 // ---------- 比较器 ----------
 const compareCache = {};
