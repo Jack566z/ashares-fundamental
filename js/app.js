@@ -42,6 +42,26 @@ document.getElementById("lockBtn").addEventListener("click", () => {
   location.reload();
 });
 
+// ---------- 深浅色主题 ----------
+// 默认浅色；月亮按钮切换，记 localStorage，下次打开恢复。只切换 CSS 变量，
+// Canvas 绘制的 K 线/指标图颜色不变（已知缺口）。
+const LS_THEME = "af_theme";
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (root && root.dataset) root.dataset.theme = theme === "dark" ? "dark" : "light";
+  try { localStorage.setItem(LS_THEME, theme === "dark" ? "dark" : "light"); } catch (e) { /* 忽略 */ }
+}
+(function initTheme() {
+  let saved = "light";
+  try { saved = localStorage.getItem(LS_THEME) || "light"; } catch (e) { /* 忽略 */ }
+  const root = document.documentElement;
+  if (root && root.dataset) root.dataset.theme = saved === "dark" ? "dark" : "light";
+})();
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const cur = (document.documentElement && document.documentElement.dataset.theme) || "light";
+  applyTheme(cur === "dark" ? "light" : "dark");
+});
+
 // ---------- 工具 ----------
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -224,6 +244,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   if (btn.dataset.tab === "sector" && currentCode && sectorHistLoadedFor !== currentCode) renderSectorHist(currentCode);
   if (btn.dataset.tab === "winrate" && !winrateLoaded) { winrateLoaded = true; renderWinrate(); }
   if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
+  syncSidebarActive();
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
 const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300: renderHs300, mycharts: renderMycharts };
@@ -238,6 +259,100 @@ document.getElementById("toolTabs").addEventListener("click", (e) => {
   document.getElementById("toolArea").style.display = "block";
   document.querySelectorAll(".tool-pane").forEach((p) => { p.style.display = p.id === "tool-" + btn.dataset.tool ? "block" : "none"; });
   if (!toolLoaded[btn.dataset.tool]) { toolLoaded[btn.dataset.tool] = true; TOOL_LOADERS[btn.dataset.tool](); }
+  syncSidebarActive();
+});
+
+// ---------- 左侧功能栏导航 ----------
+// 侧栏项目只做导航：点 data-nav-tab 的走隐藏的 #tabs，点 data-nav-tool 的走隐藏的 #toolTabs，
+// 复用现有切换逻辑（懒加载、画图、工具区显隐都不改）。原横向标签栏已隐藏但 DOM 保留。
+function syncSidebarActive() {
+  const activeTab = document.querySelector("#tabs button.active");
+  const activeTool = document.querySelector("#toolTabs button.active");
+  document.querySelectorAll("#navSidebar .nav-item").forEach((it) => {
+    const tab = it.dataset ? it.dataset.navTab : null;
+    const tool = it.dataset ? it.dataset.navTool : null;
+    const on = (tab && activeTab && activeTab.dataset.tab === tab)
+      || (tool && activeTool && activeTool.dataset.tool === tool);
+    if (it.classList) it.classList.toggle("active", !!on);
+  });
+}
+function closeSidebarMobile() { document.body.classList.remove("sidebar-open"); }
+document.getElementById("navGroups").addEventListener("click", (e) => {
+  const item = e.target.closest ? e.target.closest(".nav-item[data-nav-tab], .nav-item[data-nav-tool]") : null;
+  if (item) {
+    if (item.dataset.navTab) {
+      const b = document.querySelector('#tabs button[data-tab="' + item.dataset.navTab + '"]');
+      if (b) b.click();
+    } else {
+      const b = document.querySelector('#toolTabs button[data-tool="' + item.dataset.navTool + '"]');
+      if (b) b.click();
+    }
+    closeSidebarMobile();
+    return;
+  }
+  const head = e.target.closest ? e.target.closest(".nav-group-head") : null;
+  if (head && head.parentElement && head.parentElement.classList) {
+    head.parentElement.classList.toggle("open");
+    updateExpandAllLabel();
+  }
+});
+function updateExpandAllLabel() {
+  const groups = document.querySelectorAll("#navSidebar .nav-group");
+  const anyClosed = Array.prototype.some.call(groups, (g) => !(g.classList && g.classList.contains("open")));
+  const label = document.querySelector("#navExpandAll span");
+  if (label) label.textContent = anyClosed ? "全部展开" : "全部收起";
+}
+document.getElementById("navExpandAll").addEventListener("click", () => {
+  const groups = document.querySelectorAll("#navSidebar .nav-group");
+  const anyClosed = Array.prototype.some.call(groups, (g) => !(g.classList && g.classList.contains("open")));
+  groups.forEach((g) => { if (g.classList) g.classList.toggle("open", anyClosed); });
+  updateExpandAllLabel();
+});
+document.getElementById("navSearch").addEventListener("input", (e) => {
+  const kw = (e.target.value || "").trim();
+  document.querySelectorAll("#navSidebar .nav-item").forEach((it) => {
+    const hit = !kw || (it.textContent || "").includes(kw);
+    it.style.display = hit ? "" : "none";
+  });
+  document.querySelectorAll("#navSidebar .nav-group").forEach((g) => {
+    const items = g.querySelectorAll(".nav-item");
+    const anyVisible = Array.prototype.some.call(items, (it) => it.style.display !== "none");
+    g.style.display = (!kw || anyVisible) ? "" : "none";
+    if (kw && anyVisible && g.classList) g.classList.add("open");
+  });
+});
+document.getElementById("watchNavToggle").addEventListener("click", () => {
+  document.getElementById("watchPanel").classList.toggle("open");
+  document.getElementById("watchNavToggle").classList.toggle("open");
+});
+document.getElementById("moversNavToggle").addEventListener("click", () => {
+  document.getElementById("moversPanel").classList.toggle("open");
+  document.getElementById("moversNavToggle").classList.toggle("open");
+});
+document.getElementById("bellBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById("bellPop");
+  pop.style.display = pop.style.display === "block" ? "none" : "block";
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest || (!e.target.closest("#bellBtn") && !e.target.closest("#bellPop"))) {
+    const pop = document.getElementById("bellPop");
+    if (pop) pop.style.display = "none";
+  }
+});
+document.getElementById("hamburgerBtn").addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
+document.getElementById("sidebarBackdrop").addEventListener("click", closeSidebarMobile);
+// 右侧顶栏“分析”按钮：6 位代码直达；否则取第一条联想结果，联想未出时现查
+document.getElementById("analyzeBtn").addEventListener("click", async () => {
+  const kw = searchInput.value.trim();
+  if (!kw) return;
+  if (/^\d{6}$/.test(kw)) { searchResults.classList.remove("open"); searchInput.value = ""; loadStock(kw); return; }
+  const first = searchResults.querySelector(".sr-item");
+  if (first) { searchResults.classList.remove("open"); searchInput.value = ""; loadStock(first.dataset.code); return; }
+  try {
+    const list = await searchStocks(kw);
+    if (list.length) { searchInput.value = ""; loadStock(list[0].code); }
+  } catch (err) { /* 搜不到时不动作 */ }
 });
 document.getElementById("hmIndexSeg").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-hm-idx]");
@@ -1334,6 +1449,7 @@ function switchToStock(code) {
   document.getElementById("toolArea").style.display = "none";
   document.getElementById("detailArea").style.display = "block";
   document.querySelectorAll("#toolTabs button").forEach((b) => b.classList.remove("active"));
+  syncSidebarActive();
   loadStock(code);
 }
 
