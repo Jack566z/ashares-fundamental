@@ -1219,28 +1219,62 @@ function calcInvestorFit(m, ext) {
 
 // ---------- 沪深300 年度回报 ----------
 // 用日线收盘价取每年最后一个交易日收盘，年度回报 = 年末收盘 / 上年末收盘 − 1。
-function calcHs300Annual(klines) {
+// opts.seedBase：沪深300基日 2004-12-31 基点 1000——有 2005 年日线但无 2004 年末收盘时，
+//   用基点补 2004 年末，这样 2005 年回报可算（仅当传入时启用，行业指数等其他调用方不受影响）。
+// 新增统计（v8）：中位数、最好/最糟年份、最长连胜纪录、10000 元复利终值（完整年份）、当年进行中。
+//   统计口径：平均/CAGR/中位数/最好最糟/连胜/10000 元只用完整年份；当年进行中单独列，不计入统计。
+//   旧字段（usable/rows/avgRet/cagr/upYears/downYears/note）保持原语义，老调用方不受影响。
+function calcHs300Annual(klines, opts) {
+  opts = opts || {};
   if (!klines || klines.length < 30) return { usable: false, reason: "沪深300 K 线不足（仅 " + (klines ? klines.length : 0) + " 根）", rows: [] };
   const byYear = {};
+  const byYearLastDate = {};
   for (const k of klines) {
     const y = String(k.date || "").slice(0, 4);
-    if (/^\d{4}$/.test(y)) byYear[y] = k.close; // 日线按日期升序，最后一个即年末收盘
+    if (/^\d{4}$/.test(y)) { byYear[y] = k.close; byYearLastDate[y] = String(k.date).slice(0, 10); } // 日线按日期升序，最后一个即年末收盘
   }
+  if (opts.seedBase && !byYear["2004"] && byYear["2005"]) byYear["2004"] = opts.seedBase;
   const years = Object.keys(byYear).sort();
   const rows = [];
   for (let i = 1; i < years.length; i++) {
     const prev = byYear[years[i - 1]], cur = byYear[years[i]];
-    if (prev && cur) rows.push({ year: years[i], close: cur, prevClose: prev, ret: cur / prev - 1 });
+    if (prev && cur) rows.push({ year: years[i], close: cur, prevClose: prev, ret: cur / prev - 1, asOf: byYearLastDate[years[i]] });
   }
   if (!rows.length) return { usable: false, reason: "K 线跨度不足一年，算不出年度回报", rows: [] };
-  const rets = rows.map((r) => r.ret);
-  const cagr = Math.pow(byYear[years[years.length - 1]] / byYear[years[0]], 1 / rows.length) - 1;
+  // 完整年份 vs 当年进行中：年均 / CAGR / 10000 元 / 正负年份数只用完整年份算，
+  // 进行中的当年不参与（否则 CAGR 会被未走完的年份稀释）
+  const curYear = String(new Date().getFullYear());
+  const completeRows = rows.filter((r) => r.year !== curYear);
+  const curRow = rows.find((r) => r.year === curYear) || null;
+  const comp = completeRows.length ? completeRows : rows;
+  const compAsc = [...comp].sort((a, b) => String(a.year).localeCompare(String(b.year)));
+  const compRets = compAsc.map((r) => r.ret);
+  const cagr = Math.pow(compAsc.reduce((a, r) => a * (1 + r.ret), 1), 1 / compAsc.length) - 1;
+  const avgRet = compRets.reduce((a, b) => a + b, 0) / compRets.length;
+  const upYears = compRets.filter((r) => r > 0).length;
+  const downYears = compRets.filter((r) => r <= 0).length;
+  compRets.sort((a, b) => a - b); // 中位数用排序后数组（求和/计数与顺序无关）
+  const medianRet = compRets.length % 2
+    ? compRets[(compRets.length - 1) / 2]
+    : (compRets[compRets.length / 2 - 1] + compRets[compRets.length / 2]) / 2;
+  let best = compAsc[0], worst = compAsc[0];
+  for (const r of compAsc) { if (r.ret > best.ret) best = r; if (r.ret < worst.ret) worst = r; }
+  let streak = { len: 0, from: null, to: null }, run = 0, runFrom = null;
+  for (const r of compAsc) {
+    if (r.ret > 0) { if (!run) runFrom = r.year; run++; if (run > streak.len) streak = { len: run, from: runFrom, to: r.year }; }
+    else run = 0;
+  }
+  const value10000 = 10000 * compAsc.reduce((a, r) => a * (1 + r.ret), 1);
   return {
     usable: true, rows: rows.reverse(),
     years: years.length, fromYear: years[0], toYear: years[years.length - 1],
-    avgRet: rets.reduce((a, b) => a + b, 0) / rets.length,
-    cagr, upYears: rets.filter((r) => r > 0).length, downYears: rets.filter((r) => r <= 0).length,
-    note: klines.source === "tencent" ? "K 线来源：腾讯（仅约 2.5 年），年度回报只覆盖近 2 年；东财长 K 线拉取失败时请重试。" : klines.source === "tencent-range" ? "K 线来源：腾讯（按 2 年分段拉取，2010 年至今）" : "K 线来源：东财（前复权日线）",
+    avgRet, cagr, upYears, downYears,
+    completeFromYear: compAsc[0].year,
+    note: klines.source === "tencent" ? "K 线来源：腾讯（仅约 2.5 年），年度回报只覆盖近 2 年；东财长 K 线拉取失败时请重试。" : klines.source === "tencent-range" ? "K 线来源：腾讯（按 2 年分段拉取，2010 年至今）" : klines.source === "eastmoney+tencent" ? "K 线来源：东财（2010 年至今）+ 腾讯分段（2005–2009 年）" : "K 线来源：东财（前复权日线）",
+    medianRet, best: { year: best.year, ret: best.ret }, worst: { year: worst.year, ret: worst.ret },
+    streak, value10000, value10000ToYear: compAsc[compAsc.length - 1].year,
+    completeYears: compAsc.length,
+    currentYear: curRow ? { year: curRow.year, ret: curRow.ret, asOf: curRow.asOf } : null,
   };
 }
 

@@ -37,16 +37,37 @@ input, select { font-family: inherit; }
   padding: 20px;
 }
 .gate-card {
-  background: #fff; border-radius: 16px; padding: 36px 32px; width: 100%; max-width: 380px;
+  background: var(--card); color: var(--ink); border: var(--card-border);
+  border-radius: 20px; padding: 40px 36px 32px; width: 100%; max-width: 420px;
   box-shadow: 0 20px 60px rgba(0,0,0,.35); text-align: center;
 }
-.gate-card h1 { font-size: 22px; margin-bottom: 4px; }
-.gate-card p.sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
-.gate-card input[type="password"] {
-  width: 100%; padding: 12px 14px; font-size: 16px; border: 1.5px solid var(--line);
-  border-radius: 8px; outline: none; letter-spacing: 2px;
+.gate-logo {
+  width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%;
+  background: var(--blue-soft); color: var(--blue);
+  display: flex; align-items: center; justify-content: center;
 }
-.gate-card input[type="password"]:focus { border-color: var(--blue); }
+.gate-logo svg { width: 32px; height: 32px; }
+.gate-brand { font-size: 17px; font-weight: 700; }
+.gate-brand .gate-ver { font-size: 12px; color: var(--muted); font-weight: 400; }
+.gate-badge {
+  display: inline-block; margin-top: 8px; padding: 2px 10px; font-size: 11px; letter-spacing: 1px;
+  color: var(--blue); background: var(--blue-soft); border-radius: 999px;
+}
+.gate-card h1 { font-size: 24px; margin: 18px 0 4px; }
+.gate-card p.sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+.gate-pw-wrap { position: relative; }
+.gate-pw-wrap input[type="password"], .gate-pw-wrap input[type="text"] {
+  width: 100%; padding: 12px 44px 12px 14px; font-size: 16px; border: 1.5px solid var(--line);
+  border-radius: 8px; outline: none; letter-spacing: 2px; background: var(--input-bg); color: var(--ink);
+}
+.gate-pw-wrap input:focus { border-color: var(--blue); }
+.gate-eye {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--faint); padding: 6px; line-height: 0;
+}
+.gate-eye svg { width: 20px; height: 20px; }
+.gate-eye:hover { color: var(--ink); }
+.gate-eye.on { color: var(--blue); }
 .gate-card .row-remember { display: flex; align-items: center; gap: 6px; margin: 12px 0 16px; color: var(--muted); font-size: 13px; }
 .gate-card button.primary {
   width: 100%; padding: 12px; font-size: 16px; background: var(--blue); color: #fff;
@@ -500,4 +521,78 @@ footer.site {
   .smith-principles { grid-template-columns:1fr !important; }
   .smith-chips { grid-template-columns:1fr 1fr !important; }
   .smith-kv { grid-template-columns:repeat(2,1fr); }
+}
+
+/* ---------- 沪深300 v8 ---------- */
+.hs300-datebar {
+  background: var(--blue-soft); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; font-size: 13px; margin-bottom: 14px;
+}
+.hs300-cards {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px;
+}
+.hs300-stat {
+  background: var(--card); border: var(--card-border); border-radius: 12px; padding: 12px 14px;
+}
+.hs300-stat-k { font-size: 12px; color: var(--muted); }
+.hs300-stat-v { font-size: 22px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.hs300-stat-v.up { color: var(--up); }
+.hs300-stat-v.down { color: var(--down); }
+.hs300-stat-s { font-size: 12px; color: var(--muted); }
+.hs300-filterbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.hs300-filterbar input[type="text"], .hs300-filterbar select {
+  padding: 7px 10px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--input-bg); color: var(--ink); outline: none;
+}
+.hs300-filterbar input[type="text"]:focus, .hs300-filterbar select:focus { border-color: var(--blue); }
+.hs300-seg { display: inline-flex; gap: 4px; }
+.hs300-seg button {
+  padding: 7px 12px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink);
+}
+.hs300-seg button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.updown-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.updown-chip.up { color: var(--up); background: var(--red-soft); }
+.updown-chip.down { color: var(--down); background: var(--green-soft); }
+.price-bar {
+  position: relative; width: 110px; height: 8px; border-radius: 4px;
+  background: var(--line); display: inline-block; vertical-align: middle;
+}
+.price-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.price-bar-fill.up { background: var(--up); }
+.price-bar-fill.down { background: var(--down); }
+.price-bar-dot {
+  position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--ink); transform: translate(-50%, -50%);
+}
+.price-bar-tick {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); opacity: .5;
+}
+.hs300-pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.hs300-pager button {
+  padding: 6px 14px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink);
+}
+.hs300-pager button:disabled { opacity: .4; cursor: default; }
+.hs300-ret-toggle { display: inline-flex; gap: 4px; margin-bottom: 12px; }
+.hs300-ret-toggle button {
+  padding: 7px 14px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--ink);
+}
+.hs300-ret-toggle button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.ret-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.ret-year-tbl td.num { font-variant-numeric: tabular-nums; font-weight: 600; }
+@media (max-width: 1100px) {
+  .hs300-cards { grid-template-columns: repeat(2, 1fr); }
+  .ret-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .hs300-cards { grid-template-columns: 1fr; }
+  .ret-grid { grid-template-columns: 1fr; }
+  .gate-card { padding: 32px 22px 26px; }
 }

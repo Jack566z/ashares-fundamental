@@ -594,6 +594,38 @@ async function fetchHs300LongKline() {
   }
 }
 
+// ---------- 10b. 沪深300 全量 K 线（年度回报 v8：回溯到 2005 年发布日）----------
+// 东财 push2his lmt=4000 约 16 年（~2010 起）；缺的早期年份用腾讯按 2 年分段补
+// （2026-11-09 实测：腾讯 fqkline sh000300 2005-04-08 首根收盘 1003.45，段内可用）。
+// 合并按日期去重，东财优先。source 标注实际来源组合。
+async function fetchHs300FullKline() {
+  let emRows = [];
+  try { emRows = await fetchKlineEM(API.HS300_CODE, 101, 4000, "1.000300"); } catch (e) { /* 降级腾讯 */ }
+  const emFirstYear = emRows.length ? Number(String(emRows[0].date).slice(0, 4)) : null;
+  const endY = new Date().getFullYear();
+  const txRows = [];
+  // 只补东财缺失的早期年份（东财可用时一般只需 2005–2009；东财失败时全量拉）
+  const txEndY = emFirstYear ? Math.min(emFirstYear, endY) : endY;
+  for (let y = 2005; y <= txEndY; y += 2) {
+    const s = y + "-01-01", en = Math.min(y + 1, endY) + "-12-31";
+    try { txRows.push(...await fetchKlineTXRange("sh000300", "day", s, en)); } catch (e2) { /* 单段失败跳过 */ }
+  }
+  const byDate = {};
+  for (const r of txRows) byDate[r.date] = r;
+  for (const r of emRows) byDate[r.date] = r;
+  const out = Object.values(byDate).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (out.length < 30) throw new Error("沪深300 长 K 线未取到（东财与腾讯均失败）");
+  out.source = emRows.length ? (txRows.length ? "eastmoney+tencent" : "eastmoney") : "tencent-range";
+  return out;
+}
+
+// ---------- 10c. 沪深300全收益指数 H00948 K 线（年度回报“含股息”档）----------
+// 东财 push2his secid 1.H00948。2026-11-09 VM 实测持续 rc=102（同出口下 sh000300
+// push2his 亦 rc=102，属出口限流；浏览器端可能通）。失败时调用方标暂不可用，不编数。
+async function fetchHs300TotalReturnKline() {
+  return await fetchKlineEM("H00948", 101, 4000, "1.H00948");
+}
+
 // ---------- 11. 板块指数 K 线（行业历史用）----------
 // 板块 secid = 90.BKxxxx（2026-11-09 实测：90.BK0429 行情 rc=0，名称“交运设备”）。
 // push2his 偶发 rc=102，调用方应重试 2 次。
@@ -657,6 +689,40 @@ async function fetchReports(code, days = 90, pages = 3) {
   return out;
 }
 function num2orNull(v) { const n = parseFloat(v); return isFinite(n) && n !== 0 ? n : null; }
+
+// ---------- 12b. 研报批量拉取（沪深300目标价表用：一次拉全市场最新 N 篇）----------
+// 与 fetchReports 同一接口，但不按单只股筛选，返回 {code: {count, epsNext, latestDate}}。
+// 注意：count 是“拉取窗口内最新 pages×100 篇中该股的篇数”，窗口内全市场研报远超该数，
+// 计数是下限，仅供参考；页上会写明口径。pages 默认 5（500 篇）。
+async function fetchReportsBulk(days, pages = 5) {
+  const end = new Date();
+  const begin = new Date();
+  begin.setDate(begin.getDate() - days);
+  const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const map = {};
+  let total = 0;
+  for (let pageNo = 1; pageNo <= pages; pageNo++) {
+    const url = API.EM_REPORT_LIST
+      + "?qType=0&beginTime=" + fmt(begin) + "&endTime=" + fmt(end)
+      + "&pageNo=" + pageNo + "&pageSize=100";
+    const r = await fetch(url, { headers: { "Referer": "https://data.eastmoney.com/" } });
+    if (!r.ok) throw new Error("研报接口 HTTP " + r.status);
+    const j = await r.json();
+    const data = (j && j.data) || [];
+    for (const it of data) {
+      const code = String(it.stockCode || "");
+      if (!code) continue;
+      total++;
+      const e = map[code] || (map[code] = { count: 0, epsNext: null, latestDate: "" });
+      e.count++;
+      const d = (it.publishDate || "").slice(0, 10);
+      if (d >= (e.latestDate || "")) e.latestDate = d;
+      if (e.epsNext == null) { const v = num2orNull(it.predictNextYearEps); if (v != null) e.epsNext = v; }
+    }
+    if (data.length < 100) break;
+  }
+  return { map, total, days, pages };
+}
 
 // ---------- 13. 十大股东 / 机构持仓（v6：同源季度快照，见 js/holders.js）----------
 // 2026-11-09 实测结论（v6 复测确认）：

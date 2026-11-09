@@ -36,6 +36,14 @@ async function tryLogin() {
 }
 document.getElementById("gateBtn").addEventListener("click", tryLogin);
 document.getElementById("gatePw").addEventListener("keydown", (e) => { if (e.key === "Enter") tryLogin(); });
+document.getElementById("gateEye").addEventListener("click", () => {
+  const pw = document.getElementById("gatePw");
+  const show = pw.type === "password";
+  pw.type = show ? "text" : "password";
+  document.getElementById("gateEye").classList.toggle("on", show);
+  document.getElementById("gateEye").setAttribute("aria-label", show ? "隐藏密码" : "显示密码");
+  pw.focus();
+});
 document.getElementById("lockBtn").addEventListener("click", () => {
   sessionStorage.removeItem("af_auth");
   localStorage.removeItem("af_auth_remember");
@@ -248,7 +256,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   syncSidebarActive();
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
-const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300: renderHs300, mycharts: renderMycharts };
+const TOOL_LOADERS = { heatmap: renderHeatmap, radar: renderRadar, compare: renderCompare, hs300target: renderHs300Target, hs300ret: renderHs300Ret, mycharts: renderMycharts };
 const toolLoaded = {};
 document.getElementById("toolTabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tool]");
@@ -1822,7 +1830,7 @@ async function renderSectorHist(code) {
           ${metricCard("最新点位", board.price != null ? board.price.toFixed(2) : "—", "")}
           ${metricCard("今日涨跌", chgText(board.changePct), "")}
           ${metricCard("总市值", fmtMoney(board.totalMcap), "")}
-          ${ann.usable ? metricCard("近 " + ann.rows.length + " 年年化", (ann.cagr * 100).toFixed(1) + "%", ann.fromYear + "–" + ann.toYear) : ""}
+          ${ann.usable ? metricCard("近 " + ann.completeYears + " 个完整年份年化", (ann.cagr * 100).toFixed(1) + "%", ann.completeFromYear + "–" + ann.value10000ToYear) : ""}
         </div>
         <div class="chart-box short"><canvas class="chart" id="sectorHistChart"></canvas></div>
         ${ann.usable ? `<table class="tbl" style="margin-top:10px"><tr><th>年份</th><th>年末点位</th><th>年度回报</th></tr>` +
@@ -2119,116 +2127,6 @@ async function renderCompare() {
     html += `</table><p class="muted" style="margin-top:8px">ETF/指数类无财报数据，盈利/负债类指标显示“—”。对比结果按本次拉取缓存，切换股票后重新拉取。</p>`;
     res.innerHTML = html;
   });
-}
-
-// ---------- 沪深300 ----------
-async function renderHs300() {
-  const retEl = document.getElementById("hs300RetBody");
-  const tgtEl = document.getElementById("hs300TargetBody");
-  retEl.innerHTML = `<div class="loading">正在加载沪深300 K 线…</div>`;
-  tgtEl.innerHTML = `<div class="loading">正在加载沪深300成分股…</div>`;
-  // 年度回报
-  try {
-    const kl = await fetchHs300LongKline();
-    const ann = calcHs300Annual(kl);
-    if (!ann.usable) throw new Error(ann.reason);
-    retEl.innerHTML = `<div class="metrics" style="margin-bottom:10px">
-        ${metricCard("覆盖年份", ann.fromYear + "–" + ann.toYear + "（" + ann.rows.length + " 年）", ann.note)}
-        ${metricCard("平均年度回报", (ann.avgRet * 100).toFixed(1) + "%", "")}
-        ${metricCard("年化回报（CAGR）", (ann.cagr * 100).toFixed(1) + "%", "首年末收盘 → 末年末收盘")}
-        ${metricCard("上涨 / 下跌年数", ann.upYears + " / " + ann.downYears + " 年", "")}
-      </div>
-      <table class="tbl"><tr><th>年份</th><th>年末收盘</th><th>年度回报</th></tr>` +
-      ann.rows.map((r) => `<tr><td>${r.year}</td><td class="num">${r.close.toFixed(2)}</td><td class="num ${chgClass(r.ret * 100)}">${(r.ret >= 0 ? "+" : "") + (r.ret * 100).toFixed(1)}%</td></tr>`).join("") +
-      `</table><p class="muted" style="margin-top:8px">算法：每年最后一个交易日收盘价之比。仅计价格回报，不含分红（全收益回报会略高）。</p>`;
-  } catch (e) {
-    retEl.innerHTML = `<p class="muted">沪深300年度回报暂不可用（${esc(e.message || e)}）。<a href="#" id="hs300RetRetry">重试</a></p>`;
-    document.getElementById("hs300RetRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHs300(); });
-  }
-  // 目标价格：成分股聚合（datacenter 成分表 + 腾讯 qt 分批补 PE/市值）
-  // 注意：000300 不能走 fetchEmQuote——通用 secid 映射会把 000300 误判为深市（0.000300，rc=100）；
-  // 指数行情直接用腾讯 q=sh000300（[3]=现价、[39]=指数 PE-TTM，2026-11-09 实测 13.55）。
-  try {
-    const iq = await fetchTxQuotes([API.HS300_CODE]);
-    const idxQ = iq[API.HS300_CODE] || {};
-    const price = idxQ.price || null;
-    const indexPeTx = idxQ.peTtm || null;
-    if (price == null) throw new Error("沪深300现价未取到（腾讯 qt 返回空）");
-    const cons = await fetchHs300Constituents();
-    if (!cons.length) throw new Error("成分股列表无数据（datacenter RPT_INDEX_CONSTITUENT 返回空）");
-    const quotes = await fetchTxQuotesChunked(cons.map((c) => c.code));
-    const withVal = cons.map((c) => {
-      const q = quotes[c.code] || {};
-      return { ...c, pe: q.peTtm, totalMcap: q.totalMcapYi != null ? q.totalMcapYi * 1e8 : null };
-    }).filter((c) => c.pe != null && c.pe > 0 && c.totalMcap != null && c.totalMcap > 0);
-    if (!withVal.length) throw new Error("成分股 PE/市值未取到（腾讯 qt 返回空）");
-    const sumMcap = withVal.reduce((a, c) => a + c.totalMcap, 0);
-    const sumEarn = withVal.reduce((a, c) => a + c.totalMcap / c.pe, 0);
-    const peWeighted = sumEarn > 0 ? sumMcap / sumEarn : null;
-    const top50 = [...withVal].sort((a, b) => b.totalMcap - a.totalMcap).slice(0, 50);
-    // 前 50 大市值成分股归母利润同比聚合（最新报告期累计 vs 去年同期）
-    let growth = null, growthNote = "";
-    try {
-      const codes = top50.map((c) => c.code);
-      const inList = codes.map((c) => '"' + c + '"').join(",");
-      const rows = await emDatacenter(
-        "RPT_LICO_FN_CPD",
-        "SECURITY_CODE,REPORTDATE,PARENT_NETPROFIT",
-        "(SECURITY_CODE in (" + inList + "))",
-        { pageSize: 200, sortColumns: "REPORTDATE", sortTypes: "-1" }
-      );
-      const byDate = {};
-      for (const r of rows) {
-        const d = String(r.REPORTDATE || "").slice(0, 10);
-        if (!byDate[d]) byDate[d] = {};
-        byDate[d][r.SECURITY_CODE] = num(r.PARENT_NETPROFIT);
-      }
-      const dates = Object.keys(byDate).sort().reverse();
-      const d1 = dates[0];
-      const d0 = dates.find((d) => d.slice(5) === (d1 || "").slice(5) && Number(d.slice(0, 4)) === Number((d1 || "").slice(0, 4)) - 1);
-      if (d1 && d0) {
-        const common = Object.keys(byDate[d1]).filter((c) => byDate[d0][c] != null && byDate[d1][c] != null);
-        const s1 = common.reduce((a, c) => a + byDate[d1][c], 0);
-        const s0 = common.reduce((a, c) => a + byDate[d0][c], 0);
-        if (s0 && common.length) {
-          growth = s1 / s0 - 1;
-          growthNote = "前 50 大市值成分股中 " + common.length + " 只纳入（" + d1 + " 累计归母利润 vs " + d0 + " 同期）";
-        }
-      }
-      if (growth == null) growthNote = "未取到可比的两期利润数据（datacenter 返回为空或报告期不匹配）";
-    } catch (e2) {
-      growthNote = "利润聚合失败：" + (e2.message || e2);
-    }
-    const renderTargetCalc = (targetPe) => {
-      const res = calcHs300Target(price, peWeighted, growth, targetPe);
-      if (!res.usable) return `<p class="muted">目标价算不出：${esc(res.reason)}。</p>`;
-      return `<div class="dcf-result">
-        <div class="small">沪深300 目标点位（盈利增长 × 估值调整）</div>
-        <div class="big ${res.target >= price ? "up" : "down"}">${res.target.toFixed(2)} 点</div>
-        <div class="vs">当前 ${price != null ? price.toFixed(2) + " 点" : "—"} · ${res.upside >= 0 ? "高于现价 " + (res.upside * 100).toFixed(1) + "%" : "低于现价 " + Math.abs(res.upside * 100).toFixed(1) + "%"}</div>
-        <div class="small" style="margin-top:6px">${esc(res.formula)}</div>
-      </div>`;
-    };
-    tgtEl.innerHTML = `<div class="metrics" style="margin-bottom:10px">
-        ${metricCard("当前点位", price != null ? price.toFixed(2) : "—", "腾讯实时行情")}
-        ${metricCard("成分股加权 PE", peWeighted != null ? peWeighted.toFixed(2) + " 倍" : "—", "市值加权调和口径，" + withVal.length + " 只纳入")}
-        ${metricCard("腾讯指数 PE（核对）", indexPeTx != null ? indexPeTx.toFixed(2) + " 倍" : "—", "腾讯 q=sh000300 [39] PE-TTM")}
-        ${metricCard("盈利增速 g", growth != null ? (growth >= 0 ? "+" : "") + (growth * 100).toFixed(1) + "%" : "—", growthNote)}
-      </div>
-      <div class="dcf-grid">
-        <div class="dcf-field"><label>目标 PE（倍，默认=当前加权 PE）</label><input id="hs300TargetPe" type="number" step="0.5" min="1" max="60" value="${peWeighted != null ? peWeighted.toFixed(1) : ""}"></div>
-      </div>
-      <button class="primary" id="hs300CalcBtn" style="padding:9px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">重新计算</button>
-      <div id="hs300TargetResult" style="margin-top:12px">${renderTargetCalc(peWeighted)}</div>
-      <p class="muted" style="margin-top:10px">公式：目标点位 = 当前点位 × (1 + g) × (目标 PE ÷ 当前加权 PE)。g 为前 50 大市值成分股归母净利润同比聚合（累计口径）；加权 PE 为成分股市值加权调和 PE-TTM（腾讯 qt，剔除 PE≤0）。成分股名单来自东财 datacenter RPT_INDEX_CONSTITUENT（300 只）。腾讯指数 PE 是另一口径的指数 PE，可作交叉核对，两者口径不同、数值会有差异；目标 PE 默认等于当前加权 PE，即“估值不变、只赚盈利增长的钱”情景，改目标 PE 可模拟估值修复/压缩。沪深300 PB 两个免费源都给不出，本页不列 PB。</p>`;
-    document.getElementById("hs300CalcBtn").addEventListener("click", () => {
-      const tp = parseFloat(document.getElementById("hs300TargetPe").value);
-      document.getElementById("hs300TargetResult").innerHTML = renderTargetCalc(tp);
-    });
-  } catch (e) {
-    tgtEl.innerHTML = `<p class="muted">沪深300目标价格暂不可用（${esc(e.message || e)}）。成分股/行情接口偶发限流，可点“重试”。目标点位公式：当前点位 × (1+g) × (目标 PE ÷ 当前加权 PE)。<a href="#" id="hs300TgtRetry">重试</a></p>`;
-    document.getElementById("hs300TgtRetry").addEventListener("click", (ev) => { ev.preventDefault(); renderHs300(); });
-  }
 }
 
 // ---------- 我的图形 ----------

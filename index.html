@@ -11,15 +11,21 @@
 <!-- ============ 密码门 ============ -->
 <div id="gate">
   <div class="gate-card" id="gateCard">
-    <h1>🔒 A股基本面分析</h1>
-    <p class="sub">私人站点 · 请输入访问密码</p>
-    <input type="password" id="gatePw" placeholder="输入密码" autocomplete="current-password">
+    <div class="gate-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></div>
+    <div class="gate-brand">A股基本面分析 <span class="gate-ver">v3.0</span></div>
+    <div class="gate-badge">基本面分析</div>
+    <h1>私人访问</h1>
+    <p class="sub">请输入密码进入本站。</p>
+    <div class="gate-pw-wrap">
+      <input type="password" id="gatePw" placeholder="输入密码" autocomplete="current-password">
+      <button type="button" class="gate-eye" id="gateEye" title="显示/隐藏密码" aria-label="显示密码"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
     <div class="row-remember">
       <input type="checkbox" id="gateRemember"> <label for="gateRemember">记住我（本浏览器长期免密）</label>
     </div>
     <button class="primary" id="gateBtn">进入</button>
     <div class="gate-err" id="gateErr"></div>
-    <div class="gate-note">密码仅校验后进入本站，不会上传到任何服务器。<br>静态站密码只挡闲人，站内不存放任何私人数据。</div>
+    <div class="gate-note">仅限授权访问 · 密码仅在本地校验，不会上传到任何服务器。<br>静态站密码只挡闲人，站内不存放任何私人数据。</div>
   </div>
 </div>
 
@@ -73,8 +79,8 @@
             <button class="nav-item" data-nav-tool="heatmap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span>热力图</span></button>
             <button class="nav-item" data-nav-tool="radar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg><span>低估雷达</span></button>
             <button class="nav-item" data-nav-tool="compare"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg><span>比较器</span></button>
-            <button class="nav-item" data-nav-tool="hs300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg><span>沪深300目标价</span></button>
-            <button class="nav-item" data-nav-tool="hs300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>沪深300年度回报</span></button>
+            <button class="nav-item" data-nav-tool="hs300target"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg><span>沪深300指数目标价格</span></button>
+            <button class="nav-item" data-nav-tool="hs300ret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>沪深300年度回报</span></button>
             <button class="nav-item" data-nav-tab="sector"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg><span>行业历史</span></button>
             <button class="nav-item" data-nav-tab="smith"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>特里·史密斯</span></button>
             <button class="nav-item" data-nav-tab="holders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 3 7h18l-9-5z"/></svg><span>机构和超级大户</span></button>
@@ -281,7 +287,8 @@
           <button data-tool="heatmap">热力图</button>
           <button data-tool="radar">低估雷达</button>
           <button data-tool="compare">比较器</button>
-          <button data-tool="hs300">沪深300</button>
+          <button data-tool="hs300target">沪深300指数目标价格</button>
+          <button data-tool="hs300ret">沪深300年度回报</button>
           <button data-tool="mycharts">我的图形</button>
         </div>
 
@@ -682,14 +689,16 @@
             <div id="compareBody"></div>
           </div>
         </div>
-        <div class="tool-pane" id="tool-hs300" style="display:none">
+        <div class="tool-pane" id="tool-hs300target" style="display:none">
           <div class="card">
-            <h2>📈 沪深300指数年度回报率</h2>
-            <div id="hs300RetBody"></div>
-          </div>
-          <div class="card">
-            <h2>🎯 沪深300指数目标价格 <span class="muted" style="font-weight:400">成分股聚合估值 × 盈利增速推导</span></h2>
+            <h2>🎯 未来12个月沪深300指数目标价 <span class="muted" style="font-weight:400">成分股模型目标价聚合</span></h2>
             <div id="hs300TargetBody"></div>
+          </div>
+        </div>
+        <div class="tool-pane" id="tool-hs300ret" style="display:none">
+          <div class="card">
+            <h2>📈 沪深300指数年回报率（2005-2026年）</h2>
+            <div id="hs300RetBody"></div>
           </div>
         </div>
         <div class="tool-pane" id="tool-mycharts" style="display:none">
@@ -718,6 +727,7 @@
 <script src="js/profitfactor.js"></script>
 <script src="js/holders.js"></script>
 <script src="js/smith.js"></script>
+<script src="js/hs300.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
