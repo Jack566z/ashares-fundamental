@@ -1190,39 +1190,201 @@ function renderCyclicality(data, m, ext) {
     <p class="muted">Beta>1 表示比大盘波动大（进攻/周期性强），Beta<1 表示比大盘波动小（偏防御）。按日收益回归计算，窗口为最近约 1 年可对齐的交易日。</p>`;
 }
 
-// ---------- 日历 ----------
+// ---------- 财报日历 · 月历 ----------
+// 月历网格：自选股预约（每股最近 CAL_PER_STOCK 条）+ 全市场待披露（fetchUpcomingCalendar）。
+// 格子日期：已发布取 ACTUAL_PUBLISH_DATE，未发布取 FIRST_APPOINT_DATE。
+// 覆盖范围：以本次加载到的最早 / 最晚预约月份为准，超出范围的月份标暂不可用并写原因，不编数。
+const CAL_PER_STOCK = 20;
+const CAL_WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"];
+let calGrid = null;          // { sig, watch: [], market: [], error }
+let calGridPromise = null;
+let calView = null;          // { y, m, watchOnly, wallet, selDay }
+let calShellBuilt = false;
+
+function calTodayStr() {
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+}
+function calMonthKey(y, m) { return y + "-" + String(m + 1).padStart(2, "0"); }
+function calIsDone(r) { return r.IS_PUBLISH === "1" || r.IS_PUBLISH === 1; }
+// 格子日期：已发布用实际发布日，未发布用首次预约日
+function calGridDate(r) {
+  const s = (calIsDone(r) && r.ACTUAL_PUBLISH_DATE) ? r.ACTUAL_PUBLISH_DATE : r.FIRST_APPOINT_DATE;
+  return String(s || "").slice(0, 10);
+}
+function calShortType(name) {
+  const m = String(name || "").match(/(年报|半年报|一季报|三季报)$/);
+  return m ? m[1] : String(name || "").replace(/^\d+年\s*/, "");
+}
+function calLoadGrid() {
+  const sig = watchlist.map((s) => s.code).join(",");
+  if (calGrid && calGrid.sig === sig) return Promise.resolve(calGrid);
+  if (calGridPromise) return calGridPromise;
+  calGridPromise = (async () => {
+    const settled = await Promise.allSettled(watchlist.map((s) => fetchCalendar(s.code, CAL_PER_STOCK)));
+    const watch = [];
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled" && Array.isArray(r.value)) {
+        r.value.forEach((row) => watch.push(Object.assign({ __code: watchlist[i].code }, row)));
+      }
+    });
+    let market = [];
+    try { market = await fetchUpcomingCalendar(200); } catch (e) { market = []; }
+    calGrid = { sig, watch, market, error: (watch.length === 0 && market.length === 0) ? "预约数据暂不可用" : null };
+    calGridPromise = null;
+    return calGrid;
+  })();
+  return calGridPromise;
+}
+function calShellHtml() {
+  return `
+  <div class="cal-nav">
+    <button class="cal-navbtn" data-cal-nav="-1" title="上月">‹</button>
+    <span class="cal-title" id="calTitle"></span>
+    <button class="cal-navbtn" data-cal-nav="1" title="下月">›</button>
+    <button class="cal-navbtn" data-cal-nav="0">今天</button>
+    <span class="cal-toggles">
+      <label class="cal-toggle"><input type="checkbox" id="calWatchToggle" checked> ★ 关注列表</label>
+      <label class="cal-toggle"><input type="checkbox" id="calWalletToggle"> 💼 钱包</label>
+    </span>
+  </div>
+  <div id="calWalletNote" style="display:none" class="note-box">暂不可用：本站无持仓钱包功能，钱包内公司无法展示；请用关注列表查看自选股披露。</div>
+  <div id="calBanner"></div>
+  <div class="cal-week">${CAL_WEEKDAYS.map((d) => `<div>${d}</div>`).join("")}</div>
+  <div class="cal-grid" id="calGrid"></div>
+  <div id="calDay"></div>
+  <div class="cal-legend">★ 已添加到您的关注列表 &nbsp; 💼 放在你的钱包里 &nbsp; 点击股票代码 → 分析、点击日期 → 查看详情</div>
+  <p class="cal-note">披露日为业绩披露预约日，预约日可能变更，以交易所公告为准。预约数据仅覆盖近期月份：每只自选股加载最近 ${CAL_PER_STOCK} 条预约记录，全市场仅显示待披露预约；超出覆盖范围的月份标暂不可用。</p>
+  <div class="note-box">⚠ 本信息仅供参考和教育用途，不构成投资建议。评分和模型均基于一般参数计算，并不保证未来收益。请务必咨询合格的财务顾问。</div>
+  <div id="calMine"></div>`;
+}
+function calRenderDay() {
+  const el = document.getElementById("calDay");
+  if (!el || !calView || !calView.selDay) { if (el) el.innerHTML = ""; return; }
+  const rows = (calView.watchOnly ? (calGrid ? calGrid.watch : []) : (calGrid ? calGrid.market : []))
+    .filter((r) => calGridDate(r) === calView.selDay);
+  if (!rows.length) { el.innerHTML = ""; return; }
+  el.innerHTML = `<h3 style="margin-top:14px">${esc(calView.selDay)} · 当天披露（${rows.length} 家）</h3>` + rows.map((r) => {
+    const done = calIsDone(r);
+    const code = r.SECURITY_CODE || r.__code || "";
+    return `<div class="cal-item"><span class="d">${esc(calGridDate(r))}</span> <a href="#" data-cal-code="${esc(code)}">${esc(code)} ${esc(r.SECURITY_NAME_ABBR || "")}</a> ${esc(r.REPORT_TYPE_NAME || "")}
+      <span class="badge ${done ? "done" : "soon"}">${done ? "已发布" + (r.ACTUAL_PUBLISH_DATE ? "（" + String(r.ACTUAL_PUBLISH_DATE).slice(0, 10) + "）" : "") : "待披露" + (r.RESIDUAL_DAYS != null ? " · 还剩 " + r.RESIDUAL_DAYS + " 天" : "")}</span>${calView.watchOnly ? " ★" : ""}</div>`;
+  }).join("");
+}
+function calRender() {
+  const titleEl = document.getElementById("calTitle");
+  const gridEl = document.getElementById("calGrid");
+  const bannerEl = document.getElementById("calBanner");
+  if (!titleEl || !gridEl || !calView) return;
+  titleEl.textContent = calView.y + "年" + (calView.m + 1) + "月";
+  const rows = calView.watchOnly ? (calGrid ? calGrid.watch : []) : (calGrid ? calGrid.market : []);
+  const key = calMonthKey(calView.y, calView.m);
+  const today = calTodayStr();
+  const dates = rows.map(calGridDate).filter(Boolean).sort();
+  const covMin = dates.length ? dates[0].slice(0, 7) : null;
+  const covMax = dates.length ? dates[dates.length - 1].slice(0, 7) : null;
+  let banner = "";
+  let outOfRange = false;
+  if (!calGrid) {
+    banner = `<div class="cal-empty">正在加载预约数据…</div>`;
+  } else if (calGrid.error) {
+    banner = `<div class="cal-empty">预约数据暂不可用（${esc(calGrid.error)}），请稍后重试。</div>`;
+  } else if (calView.watchOnly && watchlist.length === 0) {
+    banner = `<div class="cal-empty">您的关注列表中没有任何公司。添加后，您就能在这里看到它们的财报信息。</div>`;
+  } else if (covMax && key > covMax) {
+    outOfRange = true;
+    banner = `<div class="cal-empty">该月暂不可用：预约尚未公布（本次加载的预约数据截至 ${covMax}）。2026 年报预约通常自 12 月起陆续公布，具体以交易所公告为准。</div>`;
+  } else if (covMin && key < covMin) {
+    outOfRange = true;
+    banner = `<div class="cal-empty">该月暂不可用：超出本次加载的预约记录范围（最早至 ${covMin}，每只自选股仅加载最近 ${CAL_PER_STOCK} 条）。</div>`;
+  }
+  if (bannerEl) bannerEl.innerHTML = banner;
+  const byDay = {};
+  rows.forEach((r) => {
+    const d = calGridDate(r);
+    if (d && d.slice(0, 7) === key) (byDay[d] = byDay[d] || []).push(r);
+  });
+  const firstDow = (new Date(calView.y, calView.m, 1).getDay() + 6) % 7; // 星期一为每周首日
+  const daysInMonth = new Date(calView.y, calView.m + 1, 0).getDate();
+  let cells = "";
+  for (let i = 0; i < 42; i++) {
+    const day = i - firstDow + 1;
+    if (day < 1 || day > daysInMonth) { cells += `<div class="cal-cell blank"></div>`; continue; }
+    const ds = key + "-" + String(day).padStart(2, "0");
+    const list = byDay[ds] || [];
+    const isToday = ds === today;
+    const sel = calView.selDay === ds ? " sel" : "";
+    const hasEvt = list.length ? " has-evt" : "";
+    let evts = list.slice(0, 3).map((r) => {
+      const code = r.SECURITY_CODE || r.__code || "";
+      const nm = r.SECURITY_NAME_ABBR || "";
+      return `<div class="cal-evt${calIsDone(r) ? "" : " upcoming"}" title="${esc(nm + " " + (r.REPORT_TYPE_NAME || ""))}"><a href="#" data-cal-code="${esc(code)}">${esc(code)}</a> ${esc(nm)} <i>${esc(calShortType(r.REPORT_TYPE_NAME))}</i></div>`;
+    }).join("");
+    if (list.length > 3) evts += `<div class="cal-more" data-cal-day="${ds}">还有 ${list.length - 3} 家 ›</div>`;
+    cells += `<div class="cal-cell${isToday ? " today" : ""}${sel}${hasEvt}" data-cal-day="${ds}"><span class="d">${day}</span>${isToday ? `<span class="today-badge">今天</span>` : ""}${evts}</div>`;
+  }
+  gridEl.innerHTML = cells;
+  if (calGrid && !calGrid.error && !outOfRange && Object.keys(byDay).length === 0) {
+    if (bannerEl) bannerEl.innerHTML = `<div class="cal-empty">${calView.watchOnly ? "该月暂无自选股披露预约。A 股定期报告集中在 3–4 月（年报 / 一季报）、8 月（半年报）和 10 月（三季报）披露，其他月份通常无预约；未来预约公布后会自动出现。" : "该月暂无待披露预约（全市场待披露数据来自东财预约接口）。"}</div>`;
+  }
+  calRenderDay();
+}
+function calRenderMine(data) {
+  const el = document.getElementById("calMine");
+  if (!el) return;
+  const mine = (data.calendar || []).slice().sort((a, b) => String(a.FIRST_APPOINT_DATE || "").localeCompare(String(b.FIRST_APPOINT_DATE || "")));
+  if (!mine.length) {
+    el.innerHTML = `<h3 style="margin-top:16px">当前股票 · 预约与发布</h3><p class="muted">该公司预约披露数据暂不可用${data.errors && data.errors.calendar ? "：" + esc(data.errors.calendar) : ""}。</p>`;
+    return;
+  }
+  el.innerHTML = `<h3 style="margin-top:16px">当前股票 · 预约与发布</h3>` + mine.map((r) => {
+    const done = calIsDone(r);
+    return `<div class="cal-item"><span class="d">${esc((r.FIRST_APPOINT_DATE || "").slice(0, 10))}</span> ${esc(r.REPORT_TYPE_NAME || "")}
+      <span class="badge ${done ? "done" : "soon"}">${done ? "已发布" + (r.ACTUAL_PUBLISH_DATE ? "（" + String(r.ACTUAL_PUBLISH_DATE).slice(0, 10) + "）" : "") : "待披露" + (r.RESIDUAL_DAYS != null ? " · 还剩 " + r.RESIDUAL_DAYS + " 天" : "")}</span></div>`;
+  }).join("");
+}
 async function renderCalendar(data) {
   const el = document.getElementById("calBody");
-  const mine = (data.calendar || []).slice().sort((a, b) => String(a.FIRST_APPOINT_DATE || "").localeCompare(String(b.FIRST_APPOINT_DATE || "")));
-  let html = "";
-  if (mine.length) {
-    html += `<h3>该公司 · 预约与发布</h3>` + mine.map((r) => {
-      const done = r.IS_PUBLISH === "1" || r.IS_PUBLISH === 1;
-      return `<div class="cal-item"><span class="d">${esc((r.FIRST_APPOINT_DATE || "").slice(0, 10))}</span> ${esc(r.REPORT_TYPE_NAME || "")}
-        <span class="badge ${done ? "done" : "soon"}">${done ? "已发布" + (r.ACTUAL_PUBLISH_DATE ? "（" + String(r.ACTUAL_PUBLISH_DATE).slice(0, 10) + "）" : "") : "待披露" + (r.RESIDUAL_DAYS != null ? " · 还剩 " + r.RESIDUAL_DAYS + " 天" : "")}</span></div>`;
-    }).join("");
-  } else {
-    html += `<p class="muted">该公司预约披露数据暂不可用${data.errors && data.errors.calendar ? "：" + esc(data.errors.calendar) : ""}。</p>`;
+  if (!calShellBuilt) {
+    el.innerHTML = calShellHtml();
+    calShellBuilt = true;
+    const now = new Date();
+    calView = { y: now.getFullYear(), m: now.getMonth(), watchOnly: true, wallet: false, selDay: calTodayStr() };
+    el.addEventListener("click", (e) => {
+      const nav = e.target.closest ? e.target.closest("[data-cal-nav]") : null;
+      if (nav) {
+        const d = parseInt(nav.dataset.calNav, 10);
+        if (d === 0) { const n = new Date(); calView.y = n.getFullYear(); calView.m = n.getMonth(); calView.selDay = calTodayStr(); }
+        else {
+          let y = calView.y, m = calView.m + d;
+          if (m < 0) { m = 11; y -= 1; }
+          if (m > 11) { m = 0; y += 1; }
+          calView.y = y; calView.m = m; calView.selDay = null;
+        }
+        calRender();
+        return;
+      }
+      const codeEl = e.target.closest ? e.target.closest("[data-cal-code]") : null;
+      if (codeEl) { e.preventDefault(); switchToStock(codeEl.dataset.calCode); return; }
+      const dayEl = e.target.closest ? e.target.closest("[data-cal-day]") : null;
+      if (dayEl) { calView.selDay = dayEl.dataset.calDay; calRender(); return; }
+    });
+    el.addEventListener("change", (e) => {
+      if (e.target && e.target.id === "calWatchToggle") { calView.watchOnly = !!e.target.checked; calView.selDay = null; calRender(); }
+      if (e.target && e.target.id === "calWalletToggle") {
+        calView.wallet = !!e.target.checked;
+        const n = document.getElementById("calWalletNote");
+        if (n) n.style.display = calView.wallet ? "block" : "none";
+      }
+    });
   }
-  try {
-    const upcoming = await fetchUpcomingCalendar(40);
-    const mineCodes = new Set(watchlist.map((s) => s.code));
-    const filtered = upcoming.filter((r) => mineCodes.has(r.SECURITY_CODE));
-    html += `<h3>自选股 · 近期待披露</h3>`;
-    if (filtered.length) {
-      html += filtered.slice(0, 15).map((r) =>
-        `<div class="cal-item"><span class="d">${esc((r.FIRST_APPOINT_DATE || "").slice(0, 10))}</span> <a href="#" data-cal-code="${esc(r.SECURITY_CODE)}">${esc(r.SECURITY_NAME_ABBR || r.SECURITY_CODE)}</a> ${esc(r.REPORT_TYPE_NAME || "")}
-        <span class="badge soon">还剩 ${r.RESIDUAL_DAYS != null ? r.RESIDUAL_DAYS + " 天" : "—"}</span></div>`).join("");
-      el.innerHTML = html;
-      el.querySelectorAll("[data-cal-code]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); loadStock(a.dataset.calCode); }));
-    } else {
-      html += `<p class="muted">自选股近期无待披露财报。</p>`;
-      el.innerHTML = html;
-    }
-  } catch (e) {
-    html += `<p class="muted">自选股待披露日历暂不可用（${esc(e.message || e)}）。</p>`;
-    el.innerHTML = html;
+  calRenderMine(data);
+  if (!calGrid) {
+    const g = document.getElementById("calGrid");
+    if (g) g.innerHTML = `<div class="cal-empty" style="grid-column:1/-1">正在加载预约数据…</div>`;
   }
+  try { await calLoadGrid(); } catch (e) { /* 出错时保留旧网格，横条提示见 calRender */ }
+  calRender();
 }
 
 // ============================================================
