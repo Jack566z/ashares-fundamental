@@ -21,7 +21,10 @@ js/config.js        配置：密码 SHA-256 哈希、12 只预装自选、API �
 js/api.js           数据层：东财/腾讯接口封装（搜索、行情、K线、财报、分红、日历、异动）
 js/finance.js       计算层：TTM、核心指标、六维评分、DCF、扩展指标（见下）
 js/charts.js        图表：Canvas 折线/柱状/组合图（无外部库）
+js/holders.js       机构和超级大户模块（v6）：股东分类、快照加载、超级大户详情页三 tab
 js/app.js           界面层：15 个标签页渲染、自选管理、密码门、DCF 交互
+data/holders/       股东数据季度快照（同源 JSON，见下）
+tools/refresh_holders.py  快照生成器：curl 拉东财 F10 PageAjax，写 data/holders/<code>.json
 ```
 
 ## 密码门
@@ -154,12 +157,29 @@ js/app.js           界面层：15 个标签页渲染、自选管理、密码门
 | 东财财报预约披露 | 通 | `RPT_PUBLIC_BS_APPOIN`：FIRST_APPOINT_DATE、ACTUAL_PUBLISH_DATE、RESIDUAL_DAYS、REPORT_TYPE_NAME、IS_PUBLISH |
 | 东财业绩预告 | 通 | `RPT_PUBLIC_OP_NEWPREDICT`：PREDICT_FINANCE、PREDICT_AMT_LOWER/UPPER、ADD_AMP_LOWER/UPPER、PREDICT_TYPE |
 | 东财 clist 涨幅榜（市场异动） | 通 | `push2.eastmoney.com/api/qt/clist/get`，fid=f3 按涨跌幅降序；首次 502 为偶发，重试即通 |
+| 东财 F10 股东研究 PageAjax | curl 通、浏览器不通 | `emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageAjax?code=SH600519`：十大股东 sdgd、十大流通股东 sdltgd、股东户数 gdrs、基金持仓 jjcg、机构持股汇总 jgcc 全有；但响应无 `Access-Control-Allow-Origin`，浏览器 fetch 被 CORS 拦截；`dates=`/`date=`/`endDate=` 参数均被忽略，永远只返回最新一季；ETF 代码返回 `{"status":-1,"message":"股票代码不合法"}` |
+| 东财 datacenter 股东类表 | 不通 | 22 个候选表名（RPT_F10_MAIN_HOLDER、RPT_F10_MAIN_HOLDER2、RPT_F10_HOLDER_TOTAL、RPT_F10_SDGD、RPT_F10_SDLTGD、RPT_F10_JJCG、RPT_F10_JGCC、RPT_FUND_HOLD_STOCK、RPT_MUTUAL_HOLD_STOCK 等）换 columns/filter 组合重测均报 9501“报表配置不存在” |
+| 雪球持仓接口 | 不通 | 对本机出口 IP 返回 403 且需登录态，已排除 |
 | 腾讯 ff_ 财务接口 | 不通 | `qt.gtimg.cn/q=ff_sh600519` 返回 `v_pv_none_match="1"`，未使用 |
 | 沪深300 K 线 | 通 | 指数必须显式走沪市前缀（secid 1.000300 / sh000300），通用代码映射会误判为深市；已在代码里写死 |
 
 注：东财 datacenter 的 `columns=ALL` 可用；写错列名报 9501。LICO 与 DMSK
 的日期字段名不同（REPORTDATE vs REPORT_DATE），代码里已分别处理。
 季度行是年内累计值，TTM 用“本期累计 + 上年全年 − 上年同期累计”拼。
+
+## 机构和超级大户（v6，2026-11-09）
+
+标签页“机构和超级大户”对标 AleInversor 的机构筛查员 13F + 超级投资者两页，全部换成 A 股数据。
+
+**数据源与刷新管线（关键）：** 浏览器端没有可直接调用的免费股东接口（见上表），本站采用“同源季度快照”：
+
+- 生成器 `tools/refresh_holders.py` 用 curl 拉东财 F10 PageAjax，写成 `data/holders/<code>.json`（每股一个文件，按季度累积，含十大股东/十大流通股东/股东户数 10 期/基金持仓前 50/机构持股汇总），随站一起部署；浏览器只读同源 JSON，无 CORS 问题。
+- 每季财报披露后跑一次：`python3 tools/refresh_holders.py`（全部 12 只自选股），或带代码只拉单只；跑完核对输出摘要再 git push。PageAjax 永远只返回最新一季，历史季度只能靠每次披露后及时跑脚本累积，无法事后补拉。
+- 快照目前覆盖 12 只自选股 + 贵州茅台 600519（E2E 与常用股）；煤炭 ETF 515220 无股东结构，快照为空文件，页上标暂不可用并说明原因。
+
+**模块内容：** 机构部分——季度选择器、机构持股合计/基金/社保/保险/股东户数摘要、十大股东与十大流通股东表（股东名、持股数、占比、较上期变动，按名称规则 + 接口 HOLDER_TYPE 字段分类标注：社保基金/QFII/汇金·证金/养老金/公募基金/保险/券商/私募/投资公司/个人/其他）、基金持仓前 10、机构持股汇总（jgcc ORG_TYPE 只标注实测验证过的 00=机构合计、01=基金、03=社保基金、05=保险，其余 02/04/06/07 汇总为“其他机构类型”不猜测）、股东户数 10 期趋势图。超级大户部分——本股十大流通股东中的社保/QFII/汇金·证金/养老金/个人大户卡片；跨自选股汇总（12 只自选股里哪些有社保/QFII/牛散持仓，可按类型过滤、按持仓只数排序）；点击大户进详情页，三 tab 照 AleInversor 超级投资者页做：职位（持仓表 + 1 年走势小图 + 下载 CSV）、表现（复制其季末持仓买入持有的累计收益 vs 沪深300，1年/3年/5年切换 + 分段对比条 + 管理风格统计）、投资组合结构（前十仓位环形图、申万二级行业环形图、行业权重现在 vs 前、季度堆叠条形图）。
+
+**诚实标注：** 仅一期快照时，机构持股合计的较上季变动、新企业/出售的公司、平均持有时长、行业权重上期、季度堆叠条形图均标暂不可用并说明原因（需两期以上快照）；表现数据是“按披露持仓复制”的模拟收益，不是大户真实收益，页上有方法说明；个人大户只列十大流通股东里实际出现的名字，不凭印象编造“某大户持有某股”（如葛卫东未出现在 12 只自选股任一前十，本站不列他）；兖矿十大股东仅 2 行、披露日为 2026-10-28 股权变动事件日（非季报日），页上如实标注。
 
 ## 本地验证（2026-11-09）
 

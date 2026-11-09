@@ -658,18 +658,20 @@ async function fetchReports(code, days = 90, pages = 3) {
 }
 function num2orNull(v) { const n = parseFloat(v); return isFinite(n) && n !== 0 ? n : null; }
 
-// ---------- 13. 十大股东 / 机构持仓（暂不可用，原因见 holders 说明）----------
-// 2026-11-09 实测结论：
+// ---------- 13. 十大股东 / 机构持仓（v6：同源季度快照，见 js/holders.js）----------
+// 2026-11-09 实测结论（v6 复测确认）：
 // ① 东财 F10 PageAjax（emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageAjax）
-//    curl 能返回十大股东/十大流通股东/股东户数/基金持仓，但响应无 Access-Control-Allow-Origin，
-//    浏览器 fetch 会被 CORS 拦截，静态站无法直接调用；
-// ② datacenter 无十大股东表（RPT_F10_MAIN_HOLDER / RPT_FUND_HOLD_STOCK / RPT_MUTUAL_HOLD_STOCK 均 9501）；
-// ③ 雪球 top_holders.json 对本机出口 IP 返回 403（IP 黑名单），且需登录态。
-// 因此机构持仓页只展示“暂不可用 + 原因 + 手动查看链接”，不造数据。
-// 若日后东财放开 CORS 或找到新源，在此实现 fetchHolders 并接回 renderHolders。
-async function fetchHolders() {
-  throw new Error("十大股东无浏览器可用的免费源（东财 F10 接口无 CORS、datacenter 无此表、雪球封 IP）");
-}
+//    curl 能返回十大股东 sdgd / 十大流通股东 sdltgd / 股东户数 gdrs / 基金持仓 jjcg /
+//    机构持股汇总 jgcc，但响应无 Access-Control-Allow-Origin，浏览器 fetch 会被 CORS 拦截；
+// ② datacenter 无十大股东表：22 个候选表名（RPT_F10_MAIN_HOLDER、RPT_F10_MAIN_HOLDER2、
+//    RPT_F10_HOLDER_TOTAL、RPT_F10_SDGD、RPT_F10_SDLTGD、RPT_F10_JJCG、RPT_F10_JGCC、
+//    RPT_FUND_HOLD_STOCK、RPT_MUTUAL_HOLD_STOCK 等）换 columns/filter 重测均报 9501；
+// ③ 雪球 top_holders.json 对本机出口 IP 返回 403 且需登录态；
+// ④ push2/clist 无股东名字段（f129 口径未确认、f135 未验证定义，均不可用）。
+// 因此 v6 采用“同源季度快照”：tools/refresh_holders.py 用 curl 拉 PageAjax，
+// 写成 data/holders/<code>.json 随站部署，浏览器只读同源 JSON（js/holders.js 的 holdersLoad）。
+// 本文件不再提供 fetchHolders（旧的抛错 stub 已删除）；若日后东财放开 CORS，
+// 可在此实现直调并替换 holdersLoad。
 
 // ---------- 一只股票的全部数据（并行拉取，单项失败不拖垮整页）----------
 async function fetchStockAll(code) {

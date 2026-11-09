@@ -168,6 +168,66 @@ function drawBars(canvas, data, opts = {}) {
   }
 }
 
+// ---------- 表现对比折线（复制组合 vs 基准，归一化到 100）----------
+// 机构和超级大户详情页“表现”用。
+// series: [{label, color, points: [{x: "2024-01-02", y: 100}]}]，y 已归一化；
+// 各系列点数相同、日期对齐；采样由调用方完成（≤80 点）。
+function drawPerfLines(canvas, series, opts = {}) {
+  const s = setupCanvas(canvas);
+  if (!s || !series || !series.length) return;
+  const { ctx, w, h } = s;
+  ctx.clearRect(0, 0, w, h);
+  const pad = { l: 8, r: 56, t: 26, b: 22 };
+  let lo = Infinity, hi = -Infinity;
+  for (const se of series) for (const p of se.points) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); }
+  if (!isFinite(lo) || !isFinite(hi)) return;
+  if (hi - lo < 1e-9) hi = lo + 1;
+  const padY = (hi - lo) * 0.08 || 1; lo -= padY; hi += padY;
+  const n = Math.max.apply(null, series.map((se) => se.points.length));
+  if (n < 2) return;
+  const xOf = (i) => pad.l + (i / (n - 1)) * (w - pad.l - pad.r);
+  const yOf = (v) => pad.t + (hi - v) / (hi - lo) * (h - pad.t - pad.b);
+  // 网格 + y 轴
+  ctx.strokeStyle = C_GRID; ctx.lineWidth = 1;
+  ctx.fillStyle = C_TEXT; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  for (let g = 0; g <= 4; g++) {
+    const v = lo + (hi - lo) * g / 4;
+    const y = yOf(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillText(v.toFixed(0), w - pad.r + 5, y + 4);
+  }
+  // 100 基准虚线（在范围内才画）
+  if (lo < 100 && hi > 100) {
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.l, yOf(100)); ctx.lineTo(w - pad.r, yOf(100)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 图例
+  ctx.font = "12px sans-serif";
+  let lx = pad.l + 4;
+  for (const se of series) {
+    ctx.fillStyle = se.color; ctx.fillRect(lx, pad.t - 14, 14, 3);
+    ctx.fillStyle = C_TEXT; ctx.fillText(se.label, lx + 18, pad.t - 8);
+    lx += 18 + ctx.measureText(se.label).width + 22;
+  }
+  // 折线 + 终点值
+  for (const se of series) {
+    ctx.strokeStyle = se.color; ctx.lineWidth = 2; ctx.beginPath();
+    se.points.forEach((p, i) => { const x = xOf(i), y = yOf(p.y); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke();
+    const last = se.points[se.points.length - 1];
+    ctx.fillStyle = se.color; ctx.font = "12px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(last.y.toFixed(1), w - pad.r + 5, yOf(last.y) + 4);
+  }
+  // x 轴日期（首/中/末）
+  ctx.fillStyle = C_TEXT; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+  const first = series[0].points;
+  for (const i of [0, Math.floor((n - 1) / 2), n - 1]) {
+    const p = first[i];
+    if (p) ctx.fillText(String(p.x).slice(0, 7), xOf(i), h - 6);
+  }
+}
+
 // ---------- 回撤图（回撤 % 面积图，0 在顶部，向下为负）----------
 function drawDrawdown(canvas, klines) {
   const s = setupCanvas(canvas);

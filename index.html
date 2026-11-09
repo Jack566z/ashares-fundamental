@@ -77,7 +77,7 @@
             <button class="nav-item" data-nav-tool="hs300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>沪深300年度回报</span></button>
             <button class="nav-item" data-nav-tab="sector"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg><span>行业历史</span></button>
             <button class="nav-item" data-nav-tab="smith"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>特里·史密斯</span></button>
-            <button class="nav-item" data-nav-tab="holders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 3 7h18l-9-5z"/></svg><span>机构持仓</span></button>
+            <button class="nav-item" data-nav-tab="holders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 3 7h18l-9-5z"/></svg><span>机构和超级大户</span></button>
             <button class="nav-item" data-nav-tab="company"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>公司</span></button>
           </div>
         </div>
@@ -265,7 +265,7 @@
           <button data-tab="kpi">关键绩效指标</button>
           <button data-tab="segments">业务分部</button>
           <button data-tab="seasonality">季节性</button>
-          <button data-tab="holders">机构持仓</button>
+          <button data-tab="holders">机构和超级大户</button>
           <button data-tab="analyst">分析师</button>
           <button data-tab="target">目标价格</button>
           <button data-tab="investor">谁会投资</button>
@@ -581,10 +581,10 @@
           </div>
         </div>
 
-        <!-- 机构持仓 -->
+        <!-- 机构和超级大户 -->
         <div class="tab-pane" id="pane-holders">
           <div class="card">
-            <h2>🏛️ 机构持仓 · 十大股东与基金持仓</h2>
+            <h2>🏛️ 机构和超级大户 · 十大股东与超级大户</h2>
             <div id="holdersBody"></div>
           </div>
         </div>
@@ -719,6 +719,7 @@
 <script src="js/charts.js"></script>
 <script src="js/winrate.js"></script>
 <script src="js/profitfactor.js"></script>
+<script src="js/holders.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

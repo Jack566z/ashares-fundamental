@@ -244,6 +244,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   if (btn.dataset.tab === "sector" && currentCode && sectorHistLoadedFor !== currentCode) renderSectorHist(currentCode);
   if (btn.dataset.tab === "winrate" && !winrateLoaded) { winrateLoaded = true; renderWinrate(); }
   if (btn.dataset.tab === "profitfactor" && !profitLoaded) { profitLoaded = true; renderProfitFactor(); }
+  if (btn.dataset.tab === "holders" && currentCode) holdersEnsureCross();
   syncSidebarActive();
 });
 // 工具包标签（市场级）：隐藏个股详情区，显示工具区，首次打开懒加载
@@ -1327,17 +1328,11 @@ function renderSeasonality(data) {
   el.innerHTML = html;
 }
 
-// ---------- 机构持仓 ----------
-function renderHolders(data) {
-  const el = document.getElementById("holdersBody");
-  const mkt = txMarket(currentCode);
-  const emUrl = "https://quote.eastmoney.com/" + mkt + currentCode + ".html";
-  el.innerHTML =
-    `<p>十大股东、十大流通股东、基金持仓与机构持股比例：<span class="badge">暂不可用</span></p>
-     <p class="muted" style="margin-top:8px">原因（2026-11-09 实测）：东财 F10 十大股东接口（emweb.securities.eastmoney.com/PC_HSF10/ShareholderResearch/PageAjax，内含十大股东 sdgd、十大流通股东 sdltgd、股东户数 gdrs、基金持仓 jjcg、机构持股汇总 jgcc）curl 能返回数据，但响应不带 Access-Control-Allow-Origin，浏览器 fetch 会被 CORS 拦截，纯静态站无法直接调用；东财数据中心没有十大股东/基金持仓表（RPT_F10_MAIN_HOLDER、RPT_FUND_HOLD_STOCK、RPT_MUTUAL_HOLD_STOCK 均报“报表配置不存在”）；雪球持仓接口对本机出口 IP 返回 403 且需登录态。本站不造数据、不放过时快照。</p>
-     <p style="margin-top:10px">手动查看：<a href="${emUrl}" target="_blank" rel="noopener">东财个股页（F10 → 股东研究）</a> · <a href="https://www.cninfo.com.cn/new/index" target="_blank" rel="noopener">巨潮资讯</a></p>
-     <p class="muted" style="margin-top:8px">若日后东财放开该接口 CORS 或找到新的免费浏览器源，本页会直接接回十大股东表（含社保/QFII/知名公募私募/牛散标注）。</p>`;
-}
+// ---------- 机构和超级大户 ----------
+// 实现在 js/holders.js（renderHolders / holdersEnsureCross），数据为同源季度快照
+// data/holders/<code>.json（tools/refresh_holders.py 生成，源为东财 F10 PageAjax）。
+// 旧的“暂不可用”占位已删除：2026-11-09 实测 PageAjax curl 通但无 CORS，
+// 数据中心无股东表，快照是唯一能用的免费路径；快照缺失的股票仍在 holders.js 里诚实标注。
 
 // ---------- 分析师 ----------
 function renderBriefing() {

@@ -317,6 +317,41 @@ canvas.chart { width: 100%; height: 100%; display: block; }
 .badge.done { background: var(--green-soft); color: #047857; }
 .badge.soon { background: #fffbeb; color: var(--amber); }
 
+/* ---------- 机构和超级大户（v6） ---------- */
+.badge.htype-shebao { background: #fef3c7; color: #92400e; }
+.badge.htype-qfii { background: #dbeafe; color: #1e40af; }
+.badge.htype-huijin { background: #fee2e2; color: #991b1b; }
+.badge.htype-pension { background: #ede9fe; color: #5b21b6; }
+.badge.htype-fund { background: #dcfce7; color: #166534; }
+.badge.htype-insurance { background: #cffafe; color: #155e75; }
+.badge.htype-broker { background: #e0e7ff; color: #3730a3; }
+.badge.htype-private { background: #fce7f3; color: #9d174d; }
+.badge.htype-company { background: #f1f5f9; color: #334155; }
+.badge.htype-person { background: #ffedd5; color: #9a3412; }
+.badge.htype-other { background: var(--surface-3); color: #475569; }
+.super-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.super-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; font-size: 13px; color: var(--ink); }
+.super-card:hover { border-color: var(--blue); }
+.super-name { font-weight: 700; font-size: 14px; }
+.super-num, .super-chg { font-size: 12px; color: var(--muted); }
+.super-go { font-size: 12px; color: var(--blue); font-weight: 600; }
+.link-btn { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 13px; padding: 0; }
+.donut-wrap { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.donut-legend { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.donut-leg { display: flex; align-items: center; gap: 6px; }
+.donut-leg b { margin-left: auto; padding-left: 12px; }
+.donut-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.donut-c1 { font-size: 20px; font-weight: 700; fill: var(--ink); }
+.donut-c2 { font-size: 12px; fill: var(--muted); }
+.cmp-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.cmp-label { width: 56px; flex: none; font-weight: 600; }
+.cmp-vals { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.cmp-line { display: flex; align-items: center; gap: 6px; }
+.cmp-line i { width: 48px; flex: none; font-style: normal; color: var(--muted); font-size: 12px; }
+.cmp-bar { display: inline-block; height: 10px; border-radius: 2px; min-width: 2px; }
+.cmp-line b { width: 64px; font-size: 12px; }
+.cmp-diff { width: 70px; flex: none; text-align: right; font-weight: 700; }
+
 /* ---------- 评分规则 ---------- */
 .rules h4 { font-size: 14px; margin: 12px 0 6px; }
 .rules table.tbl td:first-child { width: 90px; font-weight: 600; }
