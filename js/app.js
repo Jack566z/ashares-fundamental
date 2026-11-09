@@ -1424,19 +1424,323 @@ function renderInvestor(data, m, ext) {
   el.innerHTML = html;
 }
 
-// ---------- 特里·史密斯 ----------
+// ---------- 特里·史密斯 v7（按 AleInversor 图版重做）----------
+// 三个子页：分析一家公司（评分环+标准表）/ 多家公司的排名（40/20/20/20）/ 特里·史密斯的标准
+let smithHorizon = 10;
+let smithRankBusy = false;
+
+function smithStarsHTML(stars) {
+  if (stars == null) return "<span class=\"muted\">—</span>";
+  let h = "";
+  for (let i = 1; i <= 5; i++) {
+    if (stars >= i) h += "<span style=\"color:#f59e0b\">★</span>";
+    else if (stars >= i - 0.5) h += "<span style=\"position:relative;display:inline-block;color:#cbd5e1\">★<span style=\"position:absolute;left:0;top:0;width:50%;overflow:hidden;color:#f59e0b\">★</span></span>";
+    else h += "<span style=\"color:#cbd5e1\">★</span>";
+  }
+  return h;
+}
+function smithRingHTML(score10) {
+  const C = 326.73;
+  const pct = score10 != null ? Math.max(0, Math.min(1, score10 / 10)) : 0;
+  const color = score10 == null ? "#94a3b8" : score10 >= 8 ? "#1a9e54" : score10 >= 6.5 ? "#2b6cb0" : score10 >= 5 ? "#d97706" : "#e5484d";
+  return `<div class="score-ring-svg"><svg width="120" height="120" viewBox="0 0 120 120">
+    <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="9"/>
+    <circle cx="60" cy="60" r="52" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round" transform="rotate(-90 60 60)" stroke-dasharray="${C}" stroke-dashoffset="${(C * (1 - pct)).toFixed(1)}"/>
+    <text x="60" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="var(--ink)">${score10 != null ? score10.toFixed(1) : "—"}</text>
+    <text x="60" y="78" text-anchor="middle" font-size="12" fill="var(--muted)">/ 10</text>
+  </svg></div>`;
+}
+function smithFmtVal(key, v) {
+  if (v == null || !isFinite(v)) return "—";
+  if (key === "intcover") return v === Infinity ? "∞" : v.toFixed(1) + " 次";
+  if (key === "netdebtfcf") return v.toFixed(1) + " 年";
+  return (v * 100).toFixed(1) + "%";
+}
+function smithRowStars(pts, max) {
+  if (!max) return "<span class=\"muted\">—</span>";
+  let h = "";
+  for (let i = 1; i <= 4; i++) h += i <= pts ? "★" : "☆";
+  return `<span style="color:#f59e0b">${h}</span> <span class="muted">${pts}/${max}</span>`;
+}
+
 function renderSmith(data, m, ext) {
   const el = document.getElementById("smithBody");
-  const s = calcSmith(m, ext);
-  const badge = (st) => st === "pass" ? `<span class="badge done">通过</span>` : st === "fail" ? `<span class="badge" style="background:var(--red-soft);color:#991b1b">未通过</span>` : `<span class="badge">无数据</span>`;
-  let html = `<p style="margin-bottom:10px"><b>${esc(s.verdict)}</b></p>
-    <p class="muted" style="margin-bottom:10px">方法来源：Fundsmith 特里·史密斯的质量选股法——只买高资本回报、持续增长、现金流真实、低杠杆、估值合理的公司，并长期持有。以下 9 项全部用本股数据逐项算出，阈值公开：</p>
-    <table class="tbl"><tr><th>检查项</th><th>结论</th><th>依据</th></tr>`;
-  for (const it of s.items) {
-    html += `<tr><td>${esc(it.label)}</td><td>${badge(it.status)}</td><td style="text-align:left" class="muted">${esc(it.note)}</td></tr>`;
+  const code = (data && data.code) || (currentData && currentData.code) || "";
+  el.innerHTML = `
+  <div class="card smith-head">
+    <div class="smith-avatar">TS</div>
+    <div>
+      <div class="smith-motto">买入优质公司。<span style="color:var(--blue)">不要出价过高。</span>什么都不用做。</div>
+      <div class="muted" style="margin-top:4px">Fundsmith 的创始人 Terry Smith</div>
+      <div class="muted" style="margin-top:4px">它根据盈利能力、增长、利润率、现金流和债务等标准，对企业的质量进行评级，评分依据是过去 10 年的财务数据。评分范围为 0 到 10 分。</div>
+    </div>
+  </div>
+  <div class="smith-subtabs">
+    <button class="smith-subtab active" data-smith-sub="single">分析一家公司</button>
+    <button class="smith-subtab" data-smith-sub="rank">多家公司的排名</button>
+    <button class="smith-subtab" data-smith-sub="standards">特里·史密斯的标准</button>
+  </div>
+  <div id="smithPanelSingle"></div>
+  <div id="smithPanelRank" style="display:none"></div>
+  <div id="smithPanelStandards" style="display:none"></div>`;
+  el.querySelectorAll(".smith-subtab").forEach((b) => {
+    b.addEventListener("click", () => {
+      el.querySelectorAll(".smith-subtab").forEach((x) => x.classList.toggle("active", x === b));
+      document.getElementById("smithPanelSingle").style.display = b.dataset.smithSub === "single" ? "" : "none";
+      document.getElementById("smithPanelRank").style.display = b.dataset.smithSub === "rank" ? "" : "none";
+      document.getElementById("smithPanelStandards").style.display = b.dataset.smithSub === "standards" ? "" : "none";
+      if (b.dataset.smithSub === "rank") renderSmithRankPanel();
+      if (b.dataset.smithSub === "standards") renderSmithStandardsPanel();
+    });
+  });
+  renderSmithSinglePanel(data, m, code);
+  renderSmithStandardsPanel();
+}
+
+function smithCompanyCard(data, m) {
+  const pf = data.profile || null;
+  const name = (pf && pf.ORG_NAME) || m.name || data.code;
+  const market = (pf && pf.TRADE_MARKET) || (String(data.code).startsWith("6") || String(data.code).startsWith("9") ? "上海证券交易所" : String(data.code).startsWith("5") ? "上海证券交易所" : "深圳证券交易所");
+  const industry = (pf && pf.BOARD_NAME_LEVEL) || m.industry || "—";
+  return `<div class="smith-company">
+    <div class="smith-logo">${esc(String(name).slice(0, 1))}</div>
+    <div style="flex:1">
+      <div style="font-size:18px;font-weight:700">${esc(name)}</div>
+      <div class="muted">${esc(data.code)} · ${esc(String(industry).split("-").pop() || industry)}</div>
+      <div class="smith-kv">
+        <div><div class="muted">价格</div><b>${m.price != null ? m.price.toFixed(2) + " 元" : "—"}</b></div>
+        <div><div class="muted">资本化</div><b>${m.totalMcap != null ? fmtMoney(m.totalMcap) : "—"}</b></div>
+        <div><div class="muted">国家</div><b>中国</b></div>
+        <div><div class="muted">交易所</div><b>${esc(market)}</b></div>
+        <div><div class="muted">行业</div><b>${esc(m.industry || "—")}</b></div>
+        <div><div class="muted">股息收益率</div><b>${m.divYield != null ? m.divYield.toFixed(2) + "%" : "—"}</b></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSmithSinglePanel(data, m, code) {
+  const panel = document.getElementById("smithPanelSingle");
+  if (!panel) return;
+  const full = calcSmithFull(data, m, smithHorizon);
+  const years = full.series.length ? full.series[0].year + "–" + full.series[full.series.length - 1].year : "—";
+  let rowsHtml = "";
+  for (const r of full.rows) {
+    if (r.na) {
+      rowsHtml += `<tr><td style="text-align:left"><b>${esc(r.label)}</b><br><span class="muted">${esc(r.sub)}</span></td>
+        <td class="num muted">N/A</td><td class="num muted">N/A</td><td class="muted">—</td>
+        <td class="muted">—</td><td class="muted">—</td><td>${esc(r.reqText)}</td><td class="muted">不计分</td></tr>`;
+      continue;
+    }
+    const midLabel = r.midType === "cagr"
+      ? (r.mid != null ? (r.mid * 100).toFixed(1) + "%年复合增长率" : "—")
+      : (r.mid != null ? smithFmtVal(r.key, r.mid) + "中度" : "—");
+    rowsHtml += `<tr><td style="text-align:left"><b>${esc(r.label)}</b><br><span class="muted">${esc(r.sub)}</span></td>
+      <td class="num ${r.parts.last === 1 ? "up" : r.parts.last === 0 ? "down" : ""}">${r.last != null ? smithFmtVal(r.key, r.last) : "—"}</td>
+      <td class="num">${midLabel}</td>
+      <td>${smithSparkSVG(r.spark)}</td>
+      <td class="${r.trend.na ? "muted" : r.trend.improved ? "up" : "down"}">${r.trend.na ? "—" : (r.trend.improved ? "▲ 增加" : "▼ 下降")}</td>
+      <td>${r.stab.na ? "<span class=\"muted\">—</span>" : `<span class="badge ${r.stab.pts >= 1 ? "done" : ""}">${esc(r.stab.label)}</span>`}</td>
+      <td>${esc(r.reqText)}</td>
+      <td>${smithRowStars(r.pts, r.max)}</td></tr>`;
   }
-  html += `</table><p class="muted" style="margin-top:8px">通过 ${s.passed} / ${s.judged} 项（可判项）。ROIC/ROCE 的投入资本用“净资产 + 总负债”代理（见打分指南）；分红年数按有派息记录的年份数计。</p>`;
-  el.innerHTML = html;
+  panel.innerHTML = `
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+      <div class="dcf-field" style="flex:2;min-width:180px"><label>股票代码或公司名称</label>
+        <input id="smithCodeInput" value="${esc(code)}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px"></div>
+      <div class="dcf-field"><label>地平线</label>
+        <select id="smithHorizonSel" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+          <option value="10" ${smithHorizon === 10 ? "selected" : ""}>10年（建议）</option>
+          <option value="5" ${smithHorizon === 5 ? "selected" : ""}>5年</option>
+        </select></div>
+      <button class="primary" id="smithAnalyzeBtn" style="padding:8px 18px;border:none;border-radius:8px;background:var(--orange,#e8912d);color:#fff;font-size:14px">分析</button>
+      <button class="primary" id="smithExampleBtn" style="padding:8px 18px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:14px">参见示例</button>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 280px;gap:12px;margin-bottom:12px" class="smith-top">
+    <div class="card">${smithCompanyCard(data, m)}</div>
+    <div class="card" style="text-align:center">
+      ${smithRingHTML(full.score10)}
+      <div style="font-size:17px;font-weight:700;margin-top:6px">${esc(full.grade)}</div>
+      <div style="font-size:18px;margin-top:4px">${smithStarsHTML(full.stars)} <span class="muted">${full.stars != null ? full.stars.toFixed(1) : "—"}</span></div>
+      <div class="muted" style="margin-top:4px">${full.points} 分（满分 ${full.maxPoints} 分）</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px">标准 <span class="muted" style="font-weight:400">年报序列 ${esc(years)} · 共 ${full.series.length} 个年报</span></h3>
+    <table class="tbl"><tr><th style="text-align:left">标准</th><th>去年</th><th>中位/复合年增长率${smithHorizon}年</th><th>十年演变</th><th>趋势</th><th>稳定</th><th>要求</th><th>积分</th></tr>
+    ${rowsHtml}</table>
+    <p class="muted" style="margin-top:8px">计分规则：去年超要求 1 分；中位（增长项为 ${smithHorizon} 年复合增长率）超要求 1 分；趋势（近 3 年均值优于前 3 年，负债/资本支出类以下降为改善）1 分；稳定性非常稳定 1 / 稳定 0.5 / 一般 0.25 / 不稳定 0 分；ROCE&gt;WACC 另加 1 分。N/A 项不计入总分（按可测量项计分）。
+    口径：ROCE=息税前利润/总资产（投入资本用总资产代理，与本站盈利页一致）；自由现金流=经营现金流−购建长期资产（未扣股权激励，无 SBC 字段）；每股自由现金流以当前总股本折算；自由现金流收益率以当前市值折算（无 10 年期债券收益率免费源时要求按 4.3% 计）；净债务=总负债−货币资金。稀释与 ROCE vs WACC 因无公开数据来源暂不可用。</p>
+  </div>`;
+  document.getElementById("smithHorizonSel").addEventListener("change", (e) => {
+    smithHorizon = parseInt(e.target.value, 10) || 10;
+    renderSmithSinglePanel(currentData, currentMetrics, currentData.code);
+  });
+  document.getElementById("smithExampleBtn").addEventListener("click", () => {
+    document.getElementById("smithCodeInput").value = "600519";
+    if (currentData && currentData.code === "600519") renderSmithSinglePanel(currentData, currentMetrics, "600519");
+    else loadStock("600519");
+  });
+  document.getElementById("smithAnalyzeBtn").addEventListener("click", () => {
+    const c = (document.getElementById("smithCodeInput").value || "").trim();
+    const m2 = c.match(/(\d{6})/);
+    const target = m2 ? m2[1] : c;
+    if (!target) return;
+    if (currentData && currentData.code === target) renderSmithSinglePanel(currentData, currentMetrics, target);
+    else loadStock(target);
+  });
+}
+
+function renderSmithStandardsPanel() {
+  const panel = document.getElementById("smithPanelStandards");
+  if (!panel) return;
+  panel.innerHTML = `
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px" class="smith-principles">
+    <div class="card"><h3 style="margin:0 0 6px">1. 收购优秀公司</h3><p class="muted" style="margin:0">资本回报率（ROCE）高且持续高、利润率高、能将利润转化为现金、负债少、并且能够以同样的速度进行再投资以实现增长的企业。</p></div>
+    <div class="card"><h3 style="margin:0 0 6px">2. 不要支付过高的价格</h3><p class="muted" style="margin:0">特里·史密斯评估公司价值时，依据的是自由现金流（FCF）市值，而不是市盈率。一家优秀的公司如果买入价格过高，可能会在未来几年内成为糟糕的投资。</p></div>
+    <div class="card"><h3 style="margin:0 0 6px">3. 什么都不做</h3><p class="muted" style="margin:0">长期持有，让复利发挥作用，尽量减少投资组合的换手率：频繁买卖的成本和失误会侵蚀收益。</p></div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <h3 style="margin:0 0 4px">逐行列出标准</h3>
+    <p class="muted" style="margin:0 0 8px">每一行的要求与您原始电子表格的要求相同。最后一列显示的是 Fundsmith 截至 2026 年 6 月 30 日的投资组合加权平均值，该数据来自其半年报，作为 Terry Smith 眼中优质公司的基准。<b>Fundsmith 列是基金公开数据，不是本站算的。</b></p>
+    <table class="tbl"><tr><th style="text-align:left">标准</th><th>要求</th><th style="text-align:left">它测量的是什么？</th><th style="text-align:left">特里·史密斯为何在意</th><th>Fundsmith</th></tr>
+    ${[
+      ["触碰", "大于15%", "企业每投入一欧元资本所产生的营业利润。", "这是特里·史密斯最看重的指标。高且持续的资本回报率（ROCE）体现了竞争优势：企业只需少量资本就能赚取丰厚利润，而且如果企业持续增长，每一欧元的再投资都能获得同样的收益率。其稳定性以相对值来衡量。", "31%"],
+      ["销售量", "年增长率超过7%", "营收增长。去年同期：同比变化。平均值：复合年增长率（CAGR）。", "如果企业无法以同样的速度增长和再投资，那么高盈利能力就毫无意义。史密斯追求的是内生增长，而不是通过收购实现的增长。", "—"],
+      ["每股自由现金流", "年增长率超过10%", "每股自由现金流增长（不包括股票期权激励）。", "它取代了每股收益（EPS）。史密斯不信任每股收益，因为它会被股票回购、债务或会计调整所虚高。每股现金才是股东真正应得的。", "—"],
+      ["毛利率", "大于40%", "扣除产品直接成本后，每笔销售剩余的金额。", "高毛利率表明企业拥有定价权（品牌、专利、网络效应）。它还能抵御通货膨胀：即使成本上涨，对利润的影响也小得多。", "62%"],
+      ["营业利润率", "大于15%", "扣除所有运营费用后的利润率（销售息税前利润）。", "它显示了在支付了整个结构的管理费用后，有多少定价权最终转化为利润。", "29%"],
+      ["现金转换", "超过90%", "自由现金流（不包括股票激励）除以净利润。", "这是 Fundsmith 在每封信中都会公布的“现金转换率”。史密斯只信任现金：会计利润如果不能转化为现金，那就是危险信号。", "92%"],
+      ["自由现金流收益率", "高于10年期债券收益率。", "自由现金流除以市值。要求是当前的无风险利率（如果没有数据，则为 4.3%）。", "这是第二个支柱，“不要支付过高的价格”。史密斯将自由现金流回报率与债券收益率进行比较：如果一家公司的收益率低于无风险债券，就应该要求该公司实现显著增长。", "4.3%"],
+      ["利息保障倍数", "超过 10 次", "营业利润覆盖财务费用的倍数。", "史密斯会避开高杠杆公司：一家优秀的公司不需要负债就能获得良好的回报，而债务只会让糟糕的一年变成严重的问题。", "43倍"],
+      ["净债务/自由现金流", "3岁以下", "需要数年的自由现金流才能偿还所有净债务。负债表净现金。", "它以实际现金流来衡量财务风险。史密斯在债务方面非常保守，因此债务期限要求不到 3 年。", "—"],
+      ["资本支出/销售额", "不到10%", "固定资产投资占销售额的百分比。", "史密斯更喜欢资本轻型企业，这类企业无需在工厂和机器上投入大量资金即可发展壮大。", "—"],
+      ["资本支出/经营现金流", "不到20%", "用于投资的部分经营现金流。", "资本支出越少，剩下的现金就越多，可用于分红、股票回购或业务增长的资金就越多。", "—"],
+      ["稀释", "不到10%", "股票期权激励（SBC）除以自由现金流。中位数提示信息还显示了股票数量的增长情况。", "史密斯严厉批评以股票形式支付给高管的报酬：这是一种真实的成本，即使不经过现金，也会稀释股东。", "—"],
+      ["ROCE WACC", "ROCE 高于 WACC", "将盈利能力中位数与资本成本进行比较。", "一家企业只有在其盈利能力超过让其投资者满意的水平时才会创造价值。", "—"],
+    ].map((r) => `<tr><td style="text-align:left"><b>${esc(r[0])}</b></td><td><span class="badge" style="white-space:nowrap">${esc(r[1])}</span></td><td style="text-align:left" class="muted">${esc(r[2])}</td><td style="text-align:left" class="muted">${esc(r[3])}</td><td class="num"><b>${esc(r[4])}</b></td></tr>`).join("")}
+    </table>
+    <p class="muted" style="margin-top:8px">与您原电子表格相比的变化：FCF/EBITDA 现为现金转换率（由 Fundsmith 衡量），EPS 现为每股 FCF，总 FCF 增长率已替换为稀释率，净债务/FCF 比率已从 5 年缩短至 3 年，FCF 收益率已与 10 年期债券收益率进行比较。参考资料来源：Fundsmith Equity Fund 2026 年 7 月半年报。</p>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px">▼ 每行的得分方式</h3>
+    <ul style="margin:0;padding-left:20px;line-height:1.9">
+      <li><b>去年：</b>最新数据超过了要求。1 分。</li>
+      <li><b>期间平均值：</b>中位数（或销售额和每股自由现金流的复合年增长率）超过要求。加 1 分。</li>
+      <li><b>趋势：</b>过去三年的平均水平优于前三年。就债务、资本支出和股权稀释而言，改善意味着下降。1 分。</li>
+      <li><b>稳定性：</b>非常稳定 1 分，稳定 0.5 分，一般 0.25 分，不稳定 0 分。</li>
+      <li><b>ROCE 大于 WACC：</b>加 1 分。</li>
+      <li>如果某个点由于缺乏数据而显示为 N/A，则不予考虑：成绩是根据可以测量的点来计算的。</li>
+    </ul>
+  </div>`;
+}
+
+function renderSmithRankPanel() {
+  const panel = document.getElementById("smithPanelRank");
+  if (!panel) return;
+  if (panel.dataset.built) return;
+  panel.dataset.built = "1";
+  const codes = DEFAULT_WATCHLIST.map((w) => w.code).join(", ");
+  panel.innerHTML = `
+  <div class="card" style="margin-bottom:12px">
+    <h3 style="margin:0 0 4px">🏆 公司排名：质量、增长、价格和预期</h3>
+    <p class="muted" style="margin:0 0 10px">每家公司都会获得 0 到 10 分的四个分数。通过这种方法，您可以决定每个分数的权重：只看质量（纯粹的 Terry Smith 方法：它是一家好公司吗？），或者将其与其他因素结合起来，看看哪家公司在今天的价格下看起来是不错的投资。</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px" class="smith-chips">
+      <div class="dim-chip"><b>🏅 质量评分40%</b><br><span class="muted">Terry Smith 的评分</span></div>
+      <div class="dim-chip"><b>📈 增长20%</b><br><span class="muted">历史销售额、每股收益和每股自由现金流</span></div>
+      <div class="dim-chip"><b>💰 估值20%</b><br><span class="muted">市盈率、自由现金流盈利能力（相对其历史水平暂不可用，见下）</span></div>
+      <div class="dim-chip"><b>✨ 预期增长20%</b><br><span class="muted">分析师预计增长潜力可达目标价</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <label class="muted">从…加载</label>
+      <select id="smithRankSource" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+        <option value="watchlist">自选列表（12 只）</option>
+      </select>
+      <button class="primary" id="smithRankLoadBtn" style="padding:8px 16px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px">▶ 分析</button>
+    </div>
+    <div class="muted" style="margin-bottom:4px">股票代码之间用逗号、空格或换行分隔（最多 100 个）</div>
+    <textarea id="smithRankCodes" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">${esc(codes)}</textarea>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
+      <button class="primary" id="smithRankPresetBtn" style="padding:8px 16px;border:none;border-radius:8px;background:var(--blue);color:#fff;font-size:13px">📋 上传100家优质公司</button>
+      <div class="dcf-field"><label>地平线</label>
+        <select id="smithRankHorizon" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+          <option value="10">10年</option><option value="5">5年</option>
+        </select></div>
+      <div class="dcf-field"><label>方法</label>
+        <select id="smithRankMethod" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px">
+          <option value="balanced">⚖️ 均衡（40/20/20/20）</option>
+          <option value="quality">只看质量（100/0/0/0）</option>
+        </select></div>
+      <button class="primary" id="smithRankRunBtn" style="padding:8px 18px;border:none;border-radius:8px;background:var(--orange,#e8912d);color:#fff;font-size:14px">计算排名</button>
+    </div>
+    <div id="smithRankStatus" class="muted" style="margin-top:10px"></div>
+    <div id="smithRankResult" style="margin-top:10px"></div>
+    <p class="muted" style="margin-top:8px">口径：估值分量暂不含 EV/EBITDA（折旧摊销未从公开接口获得）与相对历史水平（无免费长周期 PE 历史源），只用 PE-TTM 绝对档位与自由现金流收益率；预期分量只用近 90 天内有研报的股票，无研报的票该项 N/A、按其余三项加权计分。排名逐只顺序拉取，失败的票单独标原因、不拖垮整表。</p>
+  </div>`;
+  document.getElementById("smithRankLoadBtn").addEventListener("click", () => {
+    document.getElementById("smithRankCodes").value = DEFAULT_WATCHLIST.map((w) => w.code).join(", ");
+  });
+  document.getElementById("smithRankPresetBtn").addEventListener("click", () => {
+    document.getElementById("smithRankCodes").value = DEFAULT_WATCHLIST.map((w) => w.code).join(", ");
+    document.getElementById("smithRankStatus").textContent = "本站优质公司名单即 12 只自选股（暂无 100 家名单），已填入文本框，可自行增删代码后计算排名。";
+  });
+  document.getElementById("smithRankRunBtn").addEventListener("click", runSmithRank);
+}
+
+async function runSmithRank() {
+  if (smithRankBusy) return;
+  const statusEl = document.getElementById("smithRankStatus");
+  const resultEl = document.getElementById("smithRankResult");
+  const raw = (document.getElementById("smithRankCodes").value || "");
+  const codes = [...new Set(raw.split(/[\s,;，、]+/).map((s) => (s.match(/(\d{6})/) || [null, s.trim()])[1]).filter(Boolean))].slice(0, 100);
+  if (!codes.length) { statusEl.textContent = "请先输入股票代码。"; return; }
+  const horizon = parseInt((document.getElementById("smithRankHorizon") || {}).value || "10", 10) || 10;
+  const method = (document.getElementById("smithRankMethod") || {}).value || "balanced";
+  smithRankBusy = true;
+  const rows = [];
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    statusEl.textContent = "正在计算第 " + (i + 1) + " / " + codes.length + " 只：" + code + " …";
+    try {
+      let d, m, reps;
+      if (currentData && currentData.code === code && currentMetrics) {
+        d = currentData; m = currentMetrics;
+        reps = await fetchReports(code, 90, 3).catch(() => []);
+      } else {
+        const mini = await smithFetchMinimal(code);
+        const q = mini.quote || {};
+        d = { code, quote: mini.quote, income: mini.income, incomeFull: mini.incomeFull, balance: mini.balance, cashflow: mini.cashflow, profile: null };
+        m = calcMetrics(d);
+        reps = mini.reports || [];
+        if (!mini.income || !mini.income.length) throw new Error("无财报数据（ETF/指数类或接口未返回）");
+      }
+      const name = (d.profile && d.profile.ORG_NAME) || (DEFAULT_WATCHLIST.find((w) => w.code === code) || {}).name || (d.quote && d.quote.name) || code;
+      const comp = smithRankComponents(d, m, reps, horizon);
+      const total = smithRankTotal(comp, method);
+      rows.push({ code, name, comp, total, ok: true });
+    } catch (e) {
+      rows.push({ code, name: (DEFAULT_WATCHLIST.find((w) => w.code === code) || {}).name || code, comp: null, total: null, ok: false, reason: String(e && e.message || e) });
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  smithRankBusy = false;
+  rows.sort((a, b) => (b.total == null ? -1 : a.total == null ? 1 : b.total - a.total));
+  const fmt1 = (v) => v == null ? "—" : v.toFixed(1);
+  statusEl.textContent = "已完成 " + rows.length + " 只（" + rows.filter((r) => r.ok).length + " 只算通，" + rows.filter((r) => !r.ok).length + " 只暂不可用）。";
+  resultEl.innerHTML = `<table class="tbl"><tr><th>排名</th><th>代码</th><th style="text-align:left">名称</th><th>质量40%</th><th>增长20%</th><th>估值20%</th><th>预期20%</th><th>综合</th><th style="text-align:left">备注</th></tr>` +
+    rows.map((r, i) => r.ok
+      ? `<tr><td>${r.total == null ? "—" : i + 1}</td><td>${esc(r.code)}</td><td style="text-align:left"><a href="#" data-smith-jump="${esc(r.code)}">${esc(r.name)}</a></td>
+        <td class="num">${fmt1(r.comp.quality)}</td><td class="num">${fmt1(r.comp.growth)}</td><td class="num">${fmt1(r.comp.valuation)}</td><td class="num">${fmt1(r.comp.expected)}</td>
+        <td class="num"><b>${r.total == null ? "—" : r.total.toFixed(1)}</b></td>
+        <td style="text-align:left" class="muted">${esc(r.comp.expectedNote || "")}</td></tr>`
+      : `<tr><td>—</td><td>${esc(r.code)}</td><td style="text-align:left">${esc(r.name)}</td><td class="num muted" colspan="5">暂不可用</td><td style="text-align:left" class="muted">${esc(r.reason || "")}</td></tr>`).join("") + `</table>`;
+  resultEl.querySelectorAll("[data-smith-jump]").forEach((a) => {
+    a.addEventListener("click", (ev) => { ev.preventDefault(); loadStock(a.dataset.smithJump); });
+  });
 }
 
 // ---------- 公司 ----------

@@ -483,3 +483,21 @@ footer.site {
   .card, .dim-chip { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .ov-chips-row { margin-bottom: 12px; }
 }
+
+/* ---------- 特里·史密斯 v7 ---------- */
+.smith-head { display:flex; gap:16px; align-items:flex-start; margin-bottom:12px; }
+.smith-avatar { width:64px; height:64px; flex:none; border-radius:50%; background:var(--blue-soft); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:700; border:2px solid var(--blue); }
+.smith-motto { font-size:20px; font-weight:700; line-height:1.4; }
+.smith-subtabs { display:flex; gap:4px; border-bottom:2px solid var(--line); margin-bottom:12px; }
+.smith-subtab { padding:9px 16px; border:none; background:none; font-size:14px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; }
+.smith-subtab.active { color:var(--blue); font-weight:700; border-bottom-color:var(--blue); }
+.smith-company { display:flex; gap:16px; align-items:flex-start; }
+.smith-logo { width:56px; height:56px; flex:none; border-radius:10px; background:var(--blue-soft); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:700; border:var(--card-border); }
+.smith-kv { display:grid; grid-template-columns:repeat(4,1fr); gap:8px 16px; margin-top:10px; font-size:13px; }
+.smith-kv b { font-size:14px; }
+@media (max-width: 900px) {
+  .smith-top { grid-template-columns:1fr !important; }
+  .smith-principles { grid-template-columns:1fr !important; }
+  .smith-chips { grid-template-columns:1fr 1fr !important; }
+  .smith-kv { grid-template-columns:repeat(2,1fr); }
+}
